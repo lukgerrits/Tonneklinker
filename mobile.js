@@ -61,11 +61,13 @@ async function handleRackValue(val){
 }
 
 document.getElementById('go').addEventListener('click', async ()=>{
-  const q = document.getElementById('q').value.trim();
+  const q = document.getElementById('q').value.trim().toLowerCase();
   if(!S.base||!S.token){ alert('Set Base ID & Token in desktop Settings first.'); return; }
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=FIND(LOWER('${q}'), LOWER({Name}&' '&{Producer}&' '&{Vintage}))&maxRecords=25`;
+  const fields = "LOWER({Name}&' '&{Vintage}&' '&{Country}&' '&{Region}&' '&{Grape})";
+  const formula = `FIND('${q}', ${fields})`;
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=25`;
   const r = await fetch(url, { headers: headers() });
   const data = await r.json();
-  const out = (data.records||[]).map(r=>`<div class="card"><b>${r.fields.Name||''}</b> — ${r.fields.Vintage||''}</div>`).join('');
+  const out = (data.records||[]).map(r=>`<div class="card"><b>${r.fields.Name||''}</b>${r.fields.Vintage?` — ${r.fields.Vintage}`:''}</div>`).join('');
   document.getElementById('results').innerHTML = out || '<p class="badge">No matches.</p>';
 });
