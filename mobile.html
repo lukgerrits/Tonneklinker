@@ -1,0 +1,43 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Tonneklinker</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./assets/icon-180.png">
+  <meta name="theme-color" content="#5A0E2E"/>
+  <link rel="stylesheet" href="./styles.css">
+  <style>.big{font-size:18px;padding:16px 18px;display:block;width:100%;text-align:center;margin:12px 0}#video{width:100%;border-radius:16px;border:1px solid #2a2e39}#scanBox{display:none}</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="./assets/icon-192.png" alt="Tonneklinker"/>
+    <h1>Tonneklinker</h1>
+  </header>
+
+  <main class="container">
+    <a class="big" id="btn-scan">Scan Rack QR</a>
+    <a class="big" id="btn-search">Quick Search</a>
+
+    <section id="scanBox" class="card">
+      <h2>Scan Rack</h2>
+      <video id="video" playsinline></video>
+      <p id="scanStatus" class="badge">Initializing camera…</p>
+      <button id="stopScan">Stop</button>
+    </section>
+
+    <section class="card" id="quickSearch" style="display:none">
+      <input id="q" placeholder="Wine / Producer / Vintage"/>
+      <button id="go">Search</button>
+      <div id="results"></div>
+    </section>
+  </main>
+
+  <footer>© Tonneklinker</footer>
+
+  <script src="./mobile.js"></script>
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./service-worker.js');}</script>
+</body>
+</html>

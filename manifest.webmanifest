@@ -1,0 +1,32 @@
+{
+  "name": "Tonneklinker",
+  "short_name": "Tonneklinker",
+  "description": "Scan racks, find bottles fast.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0E0F12",
+  "theme_color": "#5A0E2E",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

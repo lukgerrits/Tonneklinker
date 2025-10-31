@@ -1,0 +1,54 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Tonneklinker</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./assets/icon-180.png">
+  <meta name="theme-color" content="#5A0E2E"/>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header>
+    <img class="logo" src="./assets/icon-192.png" alt="Tonneklinker"/>
+    <h1>Tonneklinker · Cellar</h1>
+    <nav style="margin-left:auto"><a href="./mobile.html">Mobile</a></nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Search Wines</h2>
+      <div class="grid cols-2">
+        <input id="q" placeholder="Search by name, producer, grape, vintage…"/>
+        <button id="btn-search">Search</button>
+      </div>
+      <div id="results" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Inventory</h2>
+      <div id="inventory"></div>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <div class="grid cols-2">
+        <input id="airtableBase" placeholder="Airtable Base ID"/>
+        <input id="airtableToken" placeholder="Airtable Personal Access Token"/>
+        <input id="winesTable" value="Wines" placeholder="Wines table"/>
+        <input id="inventoryTable" value="Inventory" placeholder="Inventory table"/>
+        <input id="locationsTable" value="Locations" placeholder="Locations table"/>
+        <button id="btn-save">Save</button>
+      </div>
+      <p class="badge">Your token is stored locally on this device only.</p>
+    </section>
+  </main>
+
+  <footer>© Tonneklinker</footer>
+
+  <script src="./app.js"></script>
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./service-worker.js');}</script>
+</body>
+</html>
