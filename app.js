@@ -38,14 +38,26 @@ async function search(){
   const r = await fetch(url, { headers: headers() });
   const data = await r.json();
   const out = (data.records||[]).map(r=>`
-    <div class="card"><b>${r.fields.Name||''}</b>
-    ${r.fields.Vintage?` — ${r.fields.Vintage}`:''}
+    <div class="card"><b>${r.fields.Name||''}</b>${r.fields.Vintage?` — ${r.fields.Vintage}`:''}
     <br/><span class="badge">${[r.fields.Region, r.fields.Country].filter(Boolean).join(' • ')}</span></div>
   `).join('');
   document.getElementById('results').innerHTML = out || '<p class="badge">No matches.</p>';
 }
-document.getElementById('btn-search').addEventListener('click', search);
 
+async function loadInventory(){
+  if(!S.base||!S.token) return;
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=50`;
+  const r = await fetch(url, { headers: headers() });
+  const data = await r.json();
+  const out = (data.records||[]).map(r=>{
+    const f = r.fields;
+    return `<div class="card">
+      <b>${(f['Wine (Link to Wines)']||[]).join(', ')}</b>
+      <div>📍 ${(f['Location (Link to Locations)']||[]).join(', ')} — Qty: ${f.Quantity||1}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
+}
 async function loadInventory(){
   if(!S.base||!S.token) return;
   const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=50`;
