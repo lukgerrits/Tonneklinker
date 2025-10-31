@@ -30,19 +30,25 @@ document.getElementById('locationsTable').value = S.loc;
 const headers = ()=>({ 'Authorization':'Bearer '+S.token, 'Content-Type':'application/json' });
 
 async function search(){
-  const q = document.getElementById('q').value.trim();
+  const q = document.getElementById('q').value.trim().toLowerCase();
   if(!S.base||!S.token){ alert('Set Base ID and Token in Settings.'); return; }
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=FIND(LOWER('${q}'), LOWER({Name}&' '&{Producer}&' '&{Vintage}&' '&{Grape/Blend}))`;
+  const fieldsToSearch = "LOWER({Name}&' '&{Vintage}&' '&{Country}&' '&{Region}&' '&{Grape})";
+  const formula = `FIND('${q}', ${fieldsToSearch})`;
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
   const r = await fetch(url, { headers: headers() });
   const data = await r.json();
-  const out = (data.records||[]).map(r=>`<div class="card"><b>${r.fields.Name||''}</b> — ${r.fields.Vintage||''}<br/><span class="badge">${r.fields.Producer||''}</span></div>`).join('');
+  const out = (data.records||[]).map(r=>`
+    <div class="card"><b>${r.fields.Name||''}</b>
+    ${r.fields.Vintage?` — ${r.fields.Vintage}`:''}
+    <br/><span class="badge">${[r.fields.Region, r.fields.Country].filter(Boolean).join(' • ')}</span></div>
+  `).join('');
   document.getElementById('results').innerHTML = out || '<p class="badge">No matches.</p>';
 }
 document.getElementById('btn-search').addEventListener('click', search);
 
 async function loadInventory(){
   if(!S.base||!S.token) return;
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=50&sort[0][field]=Added On&sort[0][direction]=desc`;
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=50`;
   const r = await fetch(url, { headers: headers() });
   const data = await r.json();
   const out = (data.records||[]).map(r=>{
