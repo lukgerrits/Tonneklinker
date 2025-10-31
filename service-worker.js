@@ -4,7 +4,7 @@ self.addEventListener('install', (e) => {
     caches.open('tonneklinker-v1').then(cache => cache.addAll([
       './','./index.html','./mobile.html','./styles.css',
       './app.js','./mobile.js','./manifest.webmanifest',
-      './assets/icon-192.png','./assets/icon-256.png','./assets/icon-512.png'
+      './icon-192.png','./icon-256.png','./icon-512.png'
     ]))
   );
 });
