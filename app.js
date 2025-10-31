@@ -44,18 +44,25 @@ async function search(){
   document.getElementById('results').innerHTML = out || '<p class="badge">No matches.</p>';
 }
 
-async function loadInventory() {
-  if (!S.base || !S.token) return;
+async function loadInventory(){
+  if(!S.base||!S.token) return;
+  // ask Airtable to return human-readable strings for linked fields
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100&cellFormat=string`;
+  const r = await fetch(url, { headers: headers() });
+  const data = await r.json();
 
-  // 1. Load inventory records
-  const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100`;
-  const invRes = await fetch(invUrl, { headers: headers() });
-  const invData = await invRes.json();
+  const out = (data.records||[]).map(rec => {
+    const f = rec.fields;
+    const wineName = f['Wine (Link to Wines)'] || '—';
+    const locName  = f['Location (Link to Locations)'] || '—';
+    const qty      = f.Quantity || 0;
+    return `<div class="card">
+      <b>${wineName}</b><br/>📍 ${locName} — Qty: ${qty}
+    </div>`;
+  }).join('');
 
-  if (!invData.records || invData.records.length === 0) {
-    document.getElementById('inventory').innerHTML = '<p class="badge">No inventory yet.</p>';
-    return;
-  }
+  document.getElementById('inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
+}
 
   // 2. Collect all linked Wine + Location IDs
   const wineIDs = new Set();
