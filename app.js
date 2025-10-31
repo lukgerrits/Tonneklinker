@@ -44,32 +44,55 @@ async function search(){
   document.getElementById('results').innerHTML = out || '<p class="badge">No matches.</p>';
 }
 
-async function loadInventory(){
-  if(!S.base||!S.token) return;
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=50`;
-  const r = await fetch(url, { headers: headers() });
-  const data = await r.json();
-  const out = (data.records||[]).map(r=>{
-    const f = r.fields;
+async function loadInventory() {
+  if (!S.base || !S.token) return;
+
+  // 1. Load inventory records
+  const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100`;
+  const invRes = await fetch(invUrl, { headers: headers() });
+  const invData = await invRes.json();
+
+  if (!invData.records || invData.records.length === 0) {
+    document.getElementById('inventory').innerHTML = '<p class="badge">No inventory yet.</p>';
+    return;
+  }
+
+  // 2. Collect all linked Wine + Location IDs
+  const wineIDs = new Set();
+  const locIDs = new Set();
+  invData.records.forEach(r => {
+    (r.fields['Wine (Link to Wines)'] || []).forEach(id => wineIDs.add(id));
+    (r.fields['Location (Link to Locations)'] || []).forEach(id => locIDs.add(id));
+  });
+
+  // 3. Fetch names for all Wines and Locations
+  async function fetchNames(table, ids) {
+    if (ids.size === 0) return {};
+    const filter = `OR(${Array.from(ids).map(id => `RECORD_ID()='${id}'`).join(',')})`;
+    const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(table)}?filterByFormula=${encodeURIComponent(filter)}&fields[]=Name`;
+    const res = await fetch(url, { headers: headers() });
+    const json = await res.json();
+    const map = {};
+    json.records?.forEach(r => (map[r.id] = r.fields.Name));
+    return map;
+  }
+
+  const [wineMap, locMap] = await Promise.all([
+    fetchNames(S.wines, wineIDs),
+    fetchNames(S.locs, locIDs)
+  ]);
+
+  // 4. Render Inventory cards
+  const out = invData.records.map(rec => {
+    const f = rec.fields;
+    const wineName = (f['Wine (Link to Wines)'] || []).map(id => wineMap[id] || id).join(', ');
+    const locName = (f['Location (Link to Locations)'] || []).map(id => locMap[id] || id).join(', ');
+    const qty = f.Quantity || 0;
     return `<div class="card">
-      <b>${(f['Wine (Link to Wines)']||[]).join(', ')}</b>
-      <div>📍 ${(f['Location (Link to Locations)']||[]).join(', ')} — Qty: ${f.Quantity||1}</div>
+      <b>${wineName}</b><br/>📍 ${locName} — Qty: ${qty}
     </div>`;
   }).join('');
-  document.getElementById('inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
-}
-async function loadInventory(){
-  if(!S.base||!S.token) return;
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=50`;
-  const r = await fetch(url, { headers: headers() });
-  const data = await r.json();
-  const out = (data.records||[]).map(r=>{
-    const f = r.fields;
-    return `<div class="card">
-      <b>${(f['Wine (Link to Wines)']||[]).join(', ')}</b>
-      <div>📍 ${(f['Location (Link to Locations)']||[]).join(', ')} — Qty: ${f.Quantity||1}</div>
-    </div>`;
-  }).join('');
-  document.getElementById('inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
+
+  document.getElementById('inventory').innerHTML = out;
 }
 loadInventory();
