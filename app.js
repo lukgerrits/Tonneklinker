@@ -64,10 +64,15 @@ async function search(){
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
   if (!termRaw){ document.querySelector('#results').innerHTML = ''; return; }
 
-  const term = escAirtable(termRaw);
-  const within = "{Name}&' '&{Vintage}&' '&{Country}&' '&{Region}&' '&{Grape}&' '&{Taste}&' '&{Food Pairing}";
-  const formula = `SEARCH('${term}', ${within})`;
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+ const term = escAirtable(termRaw);
+
+// ✅ robust formula that never fails on blanks
+const within = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing})";
+const formula = `SEARCH('${term}', ${within})`;
+
+const url =
+  `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`
+  + `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   // DEBUG: print the exact URL so we can verify in Console/Network
   console.log('SEARCH URL →', url);
