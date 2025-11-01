@@ -56,21 +56,27 @@ function fmtPrice(p){
 }
 
 // ---- Search (rich result cards) ----
+function escAirtable(s){
+  // Airtable formulas escape single quotes by doubling them
+  return String(s || '').replace(/'/g, "''");
+}
+
 async function search(){
-  const termEl = q('#q');
-  const term = (termEl ? termEl.value : '').trim().toLowerCase();
+  const termEl = document.querySelector('#q');
+  const termRaw = (termEl ? termEl.value : '').trim();
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
+  if (!termRaw){ document.querySelector('#results').innerHTML = ''; return; }
 
-  // Only request what we render
-  const fields = [
-    'Name','Vintage','Country','Region','Grape','Taste',
-    'Food Pairing','Drinkable from','Drinkable to','Price','Label Image'
-  ];
-  const fieldParams = fields.map(f => `fields[]=${encodeURIComponent(f)}`).join('&');
+  const term = escAirtable(termRaw);
 
-  const searchable = "LOWER({Name}&' '&{Vintage}&' '&{Country}&' '&{Region}&' '&{Grape}&' '&{Taste}&' '&{Food Pairing})";
-  const formula = `FIND('${term}', ${searchable})`;
-  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?${fieldParams}&filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  // Case-insensitive search across key fields
+  // SEARCH(find_text, within_text) is case-insensitive in Airtable
+  const within = "{Name}&' '&{Vintage}&' '&{Country}&' '&{Region}&' '&{Grape}&' '&{Taste}&' '&{Food Pairing}";
+  const formula = `SEARCH('${term}', ${within})`;
+
+  const url =
+    `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`
+    + `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   try{
     const r = await fetch(url, { headers: headers() });
@@ -79,15 +85,18 @@ async function search(){
     const html = (data.records || []).map(rec => {
       const f = rec.fields || {};
       const img = (f['Label Image'] && f['Label Image'][0]?.url)
-        ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>` : '';
+        ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>`
+        : '';
 
       const chips = [
         [f.Region, f.Country].filter(Boolean).join(' • ') || null,
         f.Grape || null,
         f.Taste || null,
         f['Food Pairing'] ? `🍽️ ${f['Food Pairing']}` : null,
-        fmtWindow(f['Drinkable from'], f['Drinkable to']) ? `🕰️ ${fmtWindow(f['Drinkable from'], f['Drinkable to'])}` : null,
-        (f.Price !== '' && f.Price != null) ? `💶 ${fmtPrice(f.Price)}` : null
+        (f['Drinkable from'] || f['Drinkable to'])
+          ? `🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}`
+          : null,
+        (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
       ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
 
       return `
@@ -100,9 +109,11 @@ async function search(){
         </div>`;
     }).join('');
 
-    q('#results').innerHTML = html || '<p class="badge">No matches.</p>';
+    document.querySelector('#results').innerHTML =
+      html || '<p class="badge">No matches.</p>';
   }catch(err){
-    q('#results').innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
+    document.querySelector('#results').innerHTML =
+      `<p class="badge">Search error: ${err.message}</p>`;
   }
 }
 
