@@ -56,10 +56,7 @@ function fmtPrice(p){
 }
 
 // ---- Search (rich result cards) ----
-function escAirtable(s){
-  // Airtable formulas escape single quotes by doubling them
-  return String(s || '').replace(/'/g, "''");
-}
+function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
 
 async function search(){
   const termEl = document.querySelector('#q');
@@ -68,15 +65,12 @@ async function search(){
   if (!termRaw){ document.querySelector('#results').innerHTML = ''; return; }
 
   const term = escAirtable(termRaw);
-
-  // Case-insensitive search across key fields
-  // SEARCH(find_text, within_text) is case-insensitive in Airtable
   const within = "{Name}&' '&{Vintage}&' '&{Country}&' '&{Region}&' '&{Grape}&' '&{Taste}&' '&{Food Pairing}";
   const formula = `SEARCH('${term}', ${within})`;
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
-  const url =
-    `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`
-    + `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  // DEBUG: print the exact URL so we can verify in Console/Network
+  console.log('SEARCH URL →', url);
 
   try{
     const r = await fetch(url, { headers: headers() });
@@ -85,17 +79,14 @@ async function search(){
     const html = (data.records || []).map(rec => {
       const f = rec.fields || {};
       const img = (f['Label Image'] && f['Label Image'][0]?.url)
-        ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>`
-        : '';
+        ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>` : '';
 
       const chips = [
         [f.Region, f.Country].filter(Boolean).join(' • ') || null,
         f.Grape || null,
         f.Taste || null,
         f['Food Pairing'] ? `🍽️ ${f['Food Pairing']}` : null,
-        (f['Drinkable from'] || f['Drinkable to'])
-          ? `🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}`
-          : null,
+        (f['Drinkable from'] || f['Drinkable to']) ? `🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}` : null,
         (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
       ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
 
@@ -109,13 +100,19 @@ async function search(){
         </div>`;
     }).join('');
 
-    document.querySelector('#results').innerHTML =
-      html || '<p class="badge">No matches.</p>';
+    document.querySelector('#results').innerHTML = html || '<p class="badge">No matches.</p>';
   }catch(err){
-    document.querySelector('#results').innerHTML =
-      `<p class="badge">Search error: ${err.message}</p>`;
+    document.querySelector('#results').innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
   }
 }
+
+// Bind both click and Enter
+document.addEventListener('DOMContentLoaded', ()=>{
+  const btn = document.querySelector('#btn-search');
+  const inp = document.querySelector('#q');
+  if (btn) btn.addEventListener('click', search);
+  if (inp) inp.addEventListener('keydown', (e)=>{ if(e.key==='Enter') search(); });
+});
 
 // ---- Inventory (resolve linked IDs -> Names) ----
 async function loadInventory(){
