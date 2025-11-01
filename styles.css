@@ -7,7 +7,10 @@ header{ display:flex; align-items:center; gap:12px; padding:14px 18px; position:
         background:rgba(14,15,18,.75); backdrop-filter:blur(10px); border-bottom:1px solid #222; }
 header img.logo{ width:36px; height:36px; border-radius:9px }
 h1{ margin:0; font-size:20px }
-.container{ max-width:1100px; margin:24px auto; padding:0 20px }
+.wine-card { display:flex; gap:12px; align-items:flex-start; }
+.label-img { width:60px; height:90px; object-fit:cover; border-radius:6px; }
+.wine-info .meta { margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; }
+.badge { background:#2b2b2b; border:1px solid #3a3a3a; padding:2px 8px; border-radius:999px; font-size:12px; }.container{ max-width:1100px; margin:24px auto; padding:0 20px }
 .card{ background:#15171D; border:1px solid #21232B; border-radius:16px; padding:16px; margin:16px 0;
        box-shadow:0 8px 24px rgba(0,0,0,.25); }
 button{ background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; border:0;
@@ -19,3 +22,4 @@ input,select{ width:100%; padding:10px 12px; background:#0F1116; color:var(--fg)
 footer{ opacity:.6; text-align:center; padding:24px }
 a{ color:#9dd5d5 }
 .badge{ padding:6px 10px; border:1px solid #2a2e39; border-radius:999px; color:#cfd3da }
+
