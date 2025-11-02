@@ -1,7 +1,7 @@
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open('tonneklinker-v31').then(cache => cache.addAll([
+    caches.open('tonneklinker-v32').then(cache => cache.addAll([
       './','./index.html','./mobile.html','./styles.css',
       './app.js','./mobile.js','./manifest.webmanifest',
       './icon-192.png','./icon-256.png','./icon-512.png'
