@@ -1,5 +1,6 @@
-// ---- Tonneklinker app.js (robust multi-word search + AI-field fix) ----
+// ---- Tonneklinker app.js (v23) ----
 
+// Local settings (persisted in localStorage)
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
   set base(v){ localStorage.setItem('tk_base', v); },
@@ -16,7 +17,7 @@ const S = {
 const q = (sel) => document.querySelector(sel);
 const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
 
-// ---------- SETTINGS ----------
+// ---------- SETTINGS UI ----------
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -26,7 +27,9 @@ function saveSettings(){
   alert('Saved locally.');
 }
 
+let _handlersBound = false;
 document.addEventListener('DOMContentLoaded', () => {
+  // hydrate inputs
   const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
   set('#airtableBase', S.base);
   set('#airtableToken', S.token);
@@ -34,21 +37,40 @@ document.addEventListener('DOMContentLoaded', () => {
   set('#inventoryTable', S.inv);
   set('#locationsTable', S.loc);
 
-  const saveBtn = q('#btn-save'); if (saveBtn) saveBtn.addEventListener('click', saveSettings);
-  const searchBtn = q('#btn-search'); if (searchBtn) searchBtn.addEventListener('click', search);
-  const searchInput = q('#q'); if (searchInput) searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+  if (!_handlersBound){
+    const saveBtn = q('#btn-save');
+    if (saveBtn) saveBtn.addEventListener('click', (e)=>{ e.preventDefault(); saveSettings(); });
+
+    const searchBtn = q('#btn-search');
+    if (searchBtn){
+      // make sure it's never treated as a form submit button
+      try { searchBtn.type = 'button'; } catch(_) {}
+      searchBtn.addEventListener('click', (e)=>{ e.preventDefault(); search(); });
+    }
+
+    const searchInput = q('#q');
+    if (searchInput){
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter'){ e.preventDefault(); search(); }
+      });
+    }
+
+    _handlersBound = true;
+  }
 
   loadInventory();
 });
 
-// ---------- SEARCH ----------
+// ---------- SEARCH (multi-term AND; server first, client fallback) ----------
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
 function norm(s){
   return String(s||'')
-    .normalize('NFD')
+    .normalize('NFD')                  // remove accents (é → e)
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase();
 }
+
+let _searchAbort; // AbortController for cancelling previous searches
 
 async function search(){
   const termEl = q('#q');
@@ -57,14 +79,36 @@ async function search(){
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
   if (!raw){ out.innerHTML = ''; return; }
 
+  // cancel any previous search in-flight
+  try{ _searchAbort?.abort(); }catch(_){}
+  _searchAbort = new AbortController();
+
+  const btn = q('#btn-search');
+  if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
+
   const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
-  const headersObj = { headers: headers() };
+  const headersObj = { headers: headers(), signal: _searchAbort.signal };
+
+  // Split into terms (AND logic, natural language)
   const terms = raw.split(/\s+/).filter(Boolean);
 
-  // ---- SERVER-SIDE ATTEMPT ----
-  const concatFields = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})";
-  // safer SEARCH: wrap each in ISERROR()=FALSE() to avoid formula breakage
-  const formulaParts = terms.map(t => `NOT(ISERROR(SEARCH('${escAirtable(t)}', ${concatFields})))`);
+  // --- 1) Server-side attempt: AND(NOT(ISERROR(SEARCH(...))))
+  const concatFields =
+    "CONCATENATE(" +
+      "{Name},' '," +
+      "{Vintage},' '," +
+      "{Country},' '," +
+      "{Region},' '," +
+      "{Grape},' '," +
+      "{Taste},' '," +
+      "{Food Pairing},' '," +
+      "{Drinkable from},' '," +
+      "{Drinkable to}" +
+    ")";
+
+  const formulaParts = terms.map(t =>
+    `NOT(ISERROR(SEARCH('${escAirtable(t)}', ${concatFields})))`
+  );
   const formula = formulaParts.length === 1 ? formulaParts[0] : `AND(${formulaParts.join(',')})`;
   const serverUrl = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
   console.log('SERVER SEARCH →', serverUrl);
@@ -77,11 +121,15 @@ async function search(){
       return;
     }
   }catch(e){
-    console.warn('Server search failed — falling back to client-side search:', e);
+    if (e.name !== 'AbortError') console.warn('Server search failed, falling back:', e);
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
 
-  // ---- CLIENT-SIDE FALLBACK ----
+  // --- 2) Client-side fallback: accent-insensitive AND across fields
   try{
+    if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
+
     const r2 = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
     const data2 = await r2.json();
     const needles = terms.map(norm);
@@ -95,63 +143,54 @@ async function search(){
     });
     out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
   }catch(err){
+    if (err.name === 'AbortError') return;
     out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
 }
 
-// ---------- RENDER ----------
-function countryFlag(name){
-  if(!name) return '🌍';
-  const n = String(name).toLowerCase();
-  const map = {
-    frankrijk:'🇫🇷', italië:'🇮🇹', spanje:'🇪🇸', duitsland:'🇩🇪', portugal:'🇵🇹',
-    'verenigde staten':'🇺🇸', chili:'🇨🇱', argentinië:'🇦🇷',
-    australiië:'🇦🇺', 'nieuw zeeland':'🇳🇿', 'zuid afrika':'🇿🇦', oostenrijk:'🇦🇹',
-    greece:'🇬🇷'
-  };
-  return map[n] || '🌍';
-}
-function grapeIcon(){ return '🍇'; }
+// ---------- RENDER (no [object Object], safe arrays/attachments) ----------
 function renderSearchCards(records){
   const getText = (val) => {
-  if (val == null) return '';
-  if (typeof val === 'object') {
-    // Handle Airtable AI field format and generic objects
+    if (val == null) return '';
+    if (typeof val === 'object') {
+      // Handle Airtable AI object and generic objects
+      if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
+      if (val.value) return val.value;      // AI "Taste" style
+      if (val.text) return val.text;
+      if (val.content) return val.content;
+      if (val.name) return val.name;
+      if (val.url) return val.url;
+      return Object.values(val).join(', ');
+    }
     if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
-    if (val.value) return val.value;      // for AI “Taste” fields
-    if (val.text) return val.text;
-    if (val.content) return val.content;
-    if (val.name) return val.name;
-    if (val.url) return val.url;
-    return Object.values(val).join(', ');
-  }
-  if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
-  return String(val);
-};
+    return String(val);
+  };
 
   const html = records.map(rec => {
     const f = rec.fields || {};
+
     const imgUrl = Array.isArray(f['Label Image'])
       ? f['Label Image'][0]?.url
       : (f['Label Image']?.url || '');
     const labelImg = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
 
+    // Country – Region (in that order)
     const countryTxt = getText(f.Country);
-    const grapeTxt   = getText(f.Grape);
+    const regionTxt  = getText(f.Region);
+    const countryRegion = [countryTxt, regionTxt].filter(Boolean).join(' – ');
+
     const chips = [
-      countryTxt ? `${countryFlag(countryTxt)} ${countryTxt}` : null,
-      (f.Region || null),
-      grapeTxt ? `${grapeIcon()} ${grapeTxt}` : null,
+      countryRegion || null,
+      getText(f.Grape) || null,
       getText(f.Taste) || null,
       f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
       (f['Drinkable from'] || f['Drinkable to'])
         ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
       (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
-    ]
-    .filter(Boolean)
-    .map(x => `<span class="badge">${x}</span>`)
-    .join(' ');
+    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
 
     return `
       <div class="card wine-card">
@@ -166,7 +205,7 @@ function renderSearchCards(records){
   return html || '<p class="badge">No matches.</p>';
 }
 
-// ---------- INVENTORY ----------
+// ---------- INVENTORY (resolve linked record IDs → Names) ----------
 async function loadInventory(){
   if (!S.base || !S.token) return;
 
