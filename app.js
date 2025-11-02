@@ -1,6 +1,6 @@
-// ---- Tonneklinker app.js (full) ----
+// ---- Tonneklinker app.js (full, working) ----
 
-// Persistent settings (localStorage)
+// Local settings (persisted in localStorage)
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
   set base(v){ localStorage.setItem('tk_base', v); },
@@ -14,10 +14,10 @@ const S = {
   set loc(v){ localStorage.setItem('tk_loc', v); }
 };
 
-const q = (s) => document.querySelector(s);
+const q = (sel) => document.querySelector(sel);
 const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
 
-// ---- Settings UI ----
+// ---------- SETTINGS UI ----------
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -28,103 +28,115 @@ function saveSettings(){
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // hydrate settings inputs
-  const el = (id, val) => { const x = q(id); if (x) x.value = val; };
-  el('#airtableBase', S.base);
-  el('#airtableToken', S.token);
-  el('#winesTable',   S.wines);
-  el('#inventoryTable', S.inv);
-  el('#locationsTable', S.loc);
+  // hydrate inputs
+  const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
+  set('#airtableBase', S.base);
+  set('#airtableToken', S.token);
+  set('#winesTable', S.wines);
+  set('#inventoryTable', S.inv);
+  set('#locationsTable', S.loc);
 
   const saveBtn = q('#btn-save'); if (saveBtn) saveBtn.addEventListener('click', saveSettings);
   const searchBtn = q('#btn-search'); if (searchBtn) searchBtn.addEventListener('click', search);
+  const searchInput = q('#q'); if (searchInput) searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
 
-  // initial load
   loadInventory();
 });
 
-// ---- Helpers for rich display ----
-function fmtWindow(from, to){
-  if (!from && !to) return '';
-  if (from && to) return `${from} – ${to}`;
-  return from ? `from ${from}` : `until ${to}`;
-}
-function fmtPrice(p){
-  if (p == null || p === '') return '';
-  const n = Number(p);
-  return Number.isFinite(n) ? `€ ${n.toFixed(2)}` : String(p);
-}
-
-// ---- Search (rich result cards) ----
+// ---------- SEARCH (hybrid: server first, fallback client-side) ----------
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
+function norm(s){
+  return String(s||'')
+    .normalize('NFD')                  // remove accents (é → e)
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+}
 
 async function search(){
-  const termEl = document.querySelector('#q');
+  const termEl = q('#q');
   const termRaw = (termEl ? termEl.value : '').trim();
+  const out = q('#results');
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
-  if (!termRaw){ document.querySelector('#results').innerHTML = ''; return; }
+  if (!termRaw){ out.innerHTML = ''; return; }
 
- const term = escAirtable(termRaw);
+  const term = escAirtable(termRaw);
+  const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
+  const headersObj = { headers: headers() };
 
-// ✅ robust formula that never fails on blanks
-const within = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing})";
-const formula = `SEARCH('${term}', ${within})`;
-
-const url =
-  `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`
-  + `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
-
-  // DEBUG: print the exact URL so we can verify in Console/Network
-  console.log('SEARCH URL →', url);
+  // 1) Server-side formula (fast, but Airtable can be picky with blanks/accents)
+  const within = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing})";
+  const formula = `SEARCH('${term}', ${within})`;
+  const serverUrl = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  console.log('SERVER SEARCH →', serverUrl);
 
   try{
-    const r = await fetch(url, { headers: headers() });
+    const r = await fetch(serverUrl, headersObj);
     const data = await r.json();
+    if (Array.isArray(data.records) && data.records.length > 0){
+      out.innerHTML = renderSearchCards(data.records);
+      return;
+    }
+  }catch(e){
+    console.warn('Server search failed — falling back to client-side search:', e);
+  }
 
-    const html = (data.records || []).map(rec => {
-      const f = rec.fields || {};
-      const img = (f['Label Image'] && f['Label Image'][0]?.url)
-        ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>` : '';
-
-      const chips = [
-        [f.Region, f.Country].filter(Boolean).join(' • ') || null,
-        f.Grape || null,
-        f.Taste || null,
-        f['Food Pairing'] ? `🍽️ ${f['Food Pairing']}` : null,
-        (f['Drinkable from'] || f['Drinkable to']) ? `🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}` : null,
-        (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
-      ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
-
-      return `
-        <div class="card wine-card">
-          ${img}
-          <div class="wine-info">
-            <b>${f.Name || ''}</b>${f.Vintage ? ` — ${f.Vintage}` : ''}
-            <div class="meta">${chips}</div>
-          </div>
-        </div>`;
-    }).join('');
-
-    document.querySelector('#results').innerHTML = html || '<p class="badge">No matches.</p>';
+  // 2) Client-side fallback (accent-insensitive)
+  try{
+    const fallbackUrl = `${baseUrl}?maxRecords=200`;
+    console.log('CLIENT SEARCH →', fallbackUrl);
+    const r2 = await fetch(fallbackUrl, headersObj);
+    const data2 = await r2.json();
+    const needle = norm(termRaw);
+    const rows = (data2.records||[]).filter(rec=>{
+      const f = rec.fields||{};
+      const hay = norm([
+        f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Taste, f['Food Pairing']
+      ].filter(Boolean).join(' '));
+      return hay.includes(needle);
+    });
+    out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
   }catch(err){
-    document.querySelector('#results').innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
+    out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
   }
 }
 
-// Bind both click and Enter
-document.addEventListener('DOMContentLoaded', ()=>{
-  const btn = document.querySelector('#btn-search');
-  const inp = document.querySelector('#q');
-  if (btn) btn.addEventListener('click', search);
-  if (inp) inp.addEventListener('keydown', (e)=>{ if(e.key==='Enter') search(); });
-});
+// Renders rich wine cards (label image + all meta chips)
+function renderSearchCards(records){
+  const html = records.map(rec => {
+    const f = rec.fields || {};
+    const img = (f['Label Image'] && f['Label Image'][0]?.url)
+      ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>` : '';
 
-// ---- Inventory (resolve linked IDs -> Names) ----
+    const chips = [
+      [f.Region, f.Country].filter(Boolean).join(' • ') || null,
+      f.Grape || null,
+      f.Taste || null,
+      f['Food Pairing'] ? `🍽️ ${f['Food Pairing']}` : null,
+      (f['Drinkable from'] || f['Drinkable to'])
+        ? `🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}`
+        : null,
+      (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
+    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
+
+    return `
+      <div class="card wine-card">
+        ${img}
+        <div class="wine-info">
+          <b>${f.Name || ''}</b>${f.Vintage ? ` — ${f.Vintage}` : ''}
+          <div class="meta">${chips}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return html || '<p class="badge">No matches.</p>';
+}
+
+// ---------- INVENTORY (resolve linked record IDs → Names) ----------
 async function loadInventory(){
   if (!S.base || !S.token) return;
 
   try{
-    // 1) Get inventory
+    // 1) Load inventory rows
     const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100`;
     const invRes = await fetch(invUrl, { headers: headers() });
     const invData = await invRes.json();
@@ -134,7 +146,7 @@ async function loadInventory(){
       return;
     }
 
-    // 2) Collect unique linked IDs
+    // 2) Collect unique IDs from linked fields
     const wineIDs = new Set();
     const locIDs  = new Set();
     for (const r of invData.records){
@@ -142,7 +154,7 @@ async function loadInventory(){
       (r.fields['Location (Link to Locations)'] || []).forEach(id => locIDs.add(id));
     }
 
-    // 3) Batch fetch Names for Wines and Locations
+    // 3) Batch resolve names
     async function fetchNameMap(tableName, ids){
       const arr = Array.from(ids);
       const map = {};
@@ -162,7 +174,7 @@ async function loadInventory(){
       fetchNameMap(S.loc,   locIDs)
     ]);
 
-    // 4) Render cards with readable names
+    // 4) Render inventory cards with readable names
     const out = invData.records.map(rec => {
       const f = rec.fields || {};
       const wine = (f['Wine (Link to Wines)'] || []).map(id => wineMap[id] || id).join(', ');
