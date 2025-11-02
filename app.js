@@ -100,6 +100,18 @@ async function search(){
 }
 
 // ---------- RENDER ----------
+function countryFlag(name){
+  if(!name) return '🌍';
+  const n = String(name).toLowerCase();
+  const map = {
+    france:'🇫🇷', italy:'🇮🇹', spain:'🇪🇸', germany:'🇩🇪', portugal:'🇵🇹',
+    'united states':'🇺🇸','usa':'🇺🇸','u.s.a.':'🇺🇸', chile:'🇨🇱', argentina:'🇦🇷',
+    australia:'🇦🇺', 'new zealand':'🇳🇿', 'south africa':'🇿🇦', austria:'🇦🇹',
+    'united kingdom':'🇬🇧','uk':'🇬🇧', greece:'🇬🇷', switzerland:'🇨🇭'
+  };
+  return map[n] || '🌍';
+}
+function grapeIcon(){ return '🍇'; }
 function renderSearchCards(records){
   const getText = (val) => {
     if (val == null) return '';
@@ -118,26 +130,31 @@ function renderSearchCards(records){
 
   const html = records.map(rec => {
     const f = rec.fields || {};
-
     const imgUrl = Array.isArray(f['Label Image'])
       ? f['Label Image'][0]?.url
       : (f['Label Image']?.url || '');
-    const img = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
+    const labelImg = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
 
+    const countryTxt = getText(f.Country);
+    const grapeTxt   = getText(f.Grape);
     const chips = [
-      [getText(f.Region), getText(f.Country)].filter(Boolean).join(' • ') || null,
-      getText(f.Grape) || null,
+      countryTxt ? `${countryFlag(countryTxt)} ${countryTxt}` : null,
+      grapeTxt ? `${grapeIcon()} ${grapeTxt}` : null,
       getText(f.Taste) || null,
       f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
       (f['Drinkable from'] || f['Drinkable to'])
         ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
+      (f.Region || null),
       (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
-    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
+    ]
+    .filter(Boolean)
+    .map(x => `<span class="badge">${x}</span>`)
+    .join(' ');
 
     return `
       <div class="card wine-card">
-        ${img}
+        ${labelImg}
         <div class="wine-info">
           <b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}
           <div class="meta">${chips}</div>
