@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (v45) ----
+// ---- Tonneklinker app.js (v46) ----
 
 // Persistent settings
 const S = {
@@ -14,10 +14,41 @@ const S = {
   set loc(v){ localStorage.setItem('tk_loc', v); }
 };
 
-const q = (sel) => document.querySelector(sel);
+const q = sel => document.querySelector(sel);
 const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
 
-// ---------- SETTINGS ----------
+// Map: wineRecordId -> array of { rack, row, qty, locName }
+let INV_BY_WINE = new Map();
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Prefill settings
+  const set = (id, val) => { const el = q(id); if (el) el.value = val; };
+  set('#airtableBase', S.base);
+  set('#airtableToken', S.token);
+  set('#winesTable', S.wines);
+  set('#inventoryTable', S.inv);
+  set('#locationsTable', S.loc);
+
+  // Events
+  q('#btn-save')?.addEventListener('click', e => { e.preventDefault(); saveSettings(); });
+  q('#btn-search')?.addEventListener('click', e => { e.preventDefault(); search(); });
+  q('#q')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); search(); }});
+
+  q('#btn-open-add')?.addEventListener('click', () => q('#add-modal').classList.add('open'));
+  q('#btn-cancel-add')?.addEventListener('click', () => q('#add-modal').classList.remove('open'));
+  q('#btn-save-add')?.addEventListener('click', saveNewWine);
+
+  // Click on 📍 badge -> toast
+  document.addEventListener('click', e => {
+    const pin = e.target.closest('.badge-loc');
+    if (!pin) return;
+    const tip = pin.getAttribute('title') || 'No location info';
+    toast(tip);
+  });
+
+  loadInventory();
+});
+
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -27,282 +58,229 @@ function saveSettings(){
   alert('Saved locally.');
 }
 
-let _handlersBound = false;
-document.addEventListener('DOMContentLoaded', () => {
-  const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
-  set('#airtableBase', S.base);
-  set('#airtableToken', S.token);
-  set('#winesTable', S.wines);
-  set('#inventoryTable', S.inv);
-  set('#locationsTable', S.loc);
-
-  if (!_handlersBound){
-    const saveBtn = q('#btn-save');
-    if (saveBtn) saveBtn.addEventListener('click', e=>{ e.preventDefault(); saveSettings(); });
-
-    const searchBtn = q('#btn-search');
-    if (searchBtn){
-      searchBtn.type = 'button';
-      searchBtn.addEventListener('click', e=>{ e.preventDefault(); search(); });
-    }
-
-    const searchInput = q('#q');
-    if (searchInput){
-      searchInput.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
-    }
-
-    const addBtn = q('#btn-open-add');
-    const addModal = q('#add-modal');
-    const cancelBtn = q('#btn-cancel-add');
-    const saveAddBtn = q('#btn-save-add');
-    if (addBtn && addModal){
-      addBtn.addEventListener('click', ()=> addModal.classList.add('open'));
-    }
-    if (cancelBtn && addModal){
-      cancelBtn.addEventListener('click', ()=> addModal.classList.remove('open'));
-    }
-    if (saveAddBtn){
-      saveAddBtn.addEventListener('click', ()=> saveNewWine());
-    }
-
-    _handlersBound = true;
-  }
-
-  loadInventory();
-});
-
-// ---------- SEARCH ----------
-function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
-function norm(s){
-  return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+function toast(msg){
+  const el = q('#tk-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.opacity = '1';
+  setTimeout(()=> el.style.opacity = '0', 2200);
 }
 
-let _searchAbort;
-
+// ---------- SEARCH (AND only) ----------
 async function search(){
-  const termEl = q('#q');
-  const raw = (termEl ? termEl.value : '').trim();
+  const term = (q('#q')?.value || '').trim();
   const out = q('#results');
-
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
-  if (!raw){ out.innerHTML = ''; return; }
+  if (!term){ out.innerHTML = ''; return; }
 
-  try { _searchAbort?.abort(); } catch(_) {}
-  _searchAbort = new AbortController();
+  const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
 
-  const btn = q('#btn-search');
-  if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
-
-  const baseUrl   = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
-  const headersObj = { headers: headers(), signal: _searchAbort.signal };
-  const terms = raw.split(/\s+/).filter(Boolean);
-
+  // Search fields (AND). Include Producer and Grape as asked.
   const concat =
-    "CONCATENATE(" +
-      "{Name},' '," +
-      "{Producer},' '," +
-      "{Vintage},' '," +
-      "{Country},' '," +
-      "{Region},' '," +
-      "{Grape},' '," +
-      "{Taste},' '," +
-      "{Food Pairing},' '," +
-      "{Drinkable from},' '," +
-      "{Drinkable to}" +
-    ")";
+    "CONCATENATE({Name},' ',{Producer},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})";
 
-  const pieces  = terms.map(t => `SEARCH('${escAirtable(t)}', ${concat}) > 0`);
-  const formula = pieces.length ? `AND(${pieces.join(',')})` : '1=1';
-  const url     = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  // AND each token with SEARCH > 0
+  const parts = term.split(/\s+/).filter(Boolean).map(t => {
+    const safe = t.replace(/'/g, "''");
+    return `SEARCH('${safe}', ${concat}) > 0`;
+  });
+  const formula = parts.length ? `AND(${parts.join(',')})` : '1=1';
+  const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   try{
-    const r = await fetch(url, headersObj);
-    const data = r.ok ? await r.json() : { records: [] };
-    if (Array.isArray(data.records) && data.records.length){
-      out.innerHTML = renderSearchCards(data.records);
-      return;
-    }
-
-    const rAll = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
-    const all  = rAll.ok ? await rAll.json() : { records: [] };
-    const needles = terms.map(norm);
-    const rows = (all.records||[]).filter(rec=>{
-      const f = rec.fields || {};
-      const hay = norm([
-        f.Name, f.Producer, f.Vintage, f.Country, f.Region, f.Grape, f.Taste,
-        f['Food Pairing'], f['Drinkable from'], f['Drinkable to']
-      ].filter(Boolean).join(' '));
-      return needles.every(t => hay.includes(t));
-    });
-
-    out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
-
+    const r = await fetch(url, { headers: headers() });
+    const data = await r.json();
+    out.innerHTML = renderSearchCards(data.records || []);
   }catch(err){
-    if (err.name !== 'AbortError'){
-      console.error(err);
-      out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
-    }
-  }finally{
-    if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
+    out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
   }
 }
 
-// ---------- RENDER ----------
+// ---------- RENDER SEARCH ----------
 function renderSearchCards(records){
-  const getText = (val) => {
-    if (val == null) return '';
-    if (Array.isArray(val)) return val.map(getText).join(', ');
-    if (typeof val === 'object') {
-      if ('value' in val)   return String(val.value);
-      if ('text' in val)    return String(val.text);
-      if ('content' in val) return String(val.content);
-      if ('name' in val)    return String(val.name);
-      if ('url' in val)     return String(val.url);
-      try { return Object.values(val).join(', '); } catch { return String(val); }
-    }
-    return String(val);
-  };
+  if (!records.length) return '<p class="badge">No matches.</p>';
 
   const flagMap = {
-    Frankrijk:'🇫🇷', Italië:'🇮🇹', Oostenrijk:'🇦🇹', Spanje:'🇪🇸',
-    Duitsland:'🇩🇪', Portugal:'🇵🇹', VerenigdeStaten:'🇺🇸', Zwitserland:'🇨🇭',
-    België:'🇧🇪', Slovenië:'🇸🇮', Griekenland:'🇬🇷'
+    Frankrijk:'🇫🇷', Italië:'🇮🇹', Spanje:'🇪🇸', Duitsland:'🇩🇪', Portugal:'🇵🇹',
+    België:'🇧🇪', Oostenrijk:'🇦🇹', Zwitserland:'🇨🇭', Griekenland:'🇬🇷'
   };
 
-  const html = (records||[]).map(rec => {
+  return records.map(rec => {
     const f = rec.fields || {};
+    const flag = flagMap[f.Country] || '🌍';
 
-    const imgUrl = Array.isArray(f['Label Image'])
-      ? f['Label Image'][0]?.url
-      : (f['Label Image']?.url || '');
-    const labelImg = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label">` : '';
-
-    const country = getText(f.Country);
-    const region  = getText(f.Region);
-    const flag    = flagMap[country] || '🌍';
-    const countryRegion = [country ? (flag + ' ' + country) : '', region].filter(Boolean).join(' – ');
-
-    const grapeVal = f.Grape ?? f.Grapes ?? f['Grape(s)'] ?? f['Druif'] ?? null;
+    // Location pin from inventory map
+    const locs = INV_BY_WINE.get(rec.id) || [];
+    let pin = '';
+    if (locs.length){
+      const t = locs.map(l => `${l.rack || ''} ${l.row || ''} — Qty ${l.qty}`).join('; ');
+      pin = `<span class="badge badge-loc" title="${t}">📍</span>`;
+    }
 
     const chips = [
-      countryRegion || null,
-      grapeVal ? `🍇 ${getText(grapeVal)}` : null,
-      f.Producer ? `🏷️ ${getText(f.Producer)}` : null,
-      f.Taste ? `👅 ${getText(f.Taste)}` : null,
-      f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
-      (f['Drinkable from'] || f['Drinkable to'])
-        ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
-        : null,
-      (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
-    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
+      `<span class="badge">${flag} ${f.Country || ''} – ${f.Region || ''}</span>`,
+      f.Grape ? `<span class="badge">🍇 ${f.Grape}</span>` : '',
+      f.Producer ? `<span class="badge">🏷️ ${f.Producer}</span>` : '',
+      pin
+    ].filter(Boolean).join(' ');
+
+    const taste = f.Taste ? `<div class="badge" style="display:block;margin-top:10px">👅 ${f.Taste}</div>` : '';
+    const food  = f['Food Pairing'] ? `<div class="badge" style="display:block;margin-top:6px">🍽️ ${f['Food Pairing']}</div>` : '';
+    const window = (f['Drinkable from'] || f['Drinkable to'])
+      ? `<span class="badge" style="margin-top:8px;display:inline-block">🕰️ ${(f['Drinkable from']||'')} – ${(f['Drinkable to']||'')}</span>` : '';
+    const price = (f.Price != null && f.Price !== '')
+      ? `<span class="badge" style="margin-top:8px;display:inline-block">💶 € ${Number(f.Price).toFixed(2)}</span>` : '';
 
     return `
       <div class="card wine-card">
-        ${labelImg}
         <div class="wine-info">
-          <b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}
-          <div class="meta">${chips}</div>
+          <b>${f.Name || ''}</b>${f.Vintage ? ` — ${f.Vintage}` : ''}
+          <div class="meta" style="margin-top:6px">${chips}</div>
+          ${taste}
+          ${food}
+          <div style="margin-top:6px">${window} ${price}</div>
         </div>
-      </div>`;
+      </div>
+    `;
   }).join('');
-
-  return html || '<p class="badge">No matches.</p>';
 }
 
-// ---------- ADD NEW WINE ----------
+// ---------- ADD WINE ----------
 async function saveNewWine(){
-  const val = id => q(`#${id}`)?.value.trim();
-  const modal = q('#add-modal');
+  if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
 
-  const name = val('nw-name');
-  if (!name){ alert('Name is required.'); return; }
+  const g = id => q(`#${id}`)?.value.trim() || '';
+  const vintageNum = g('nw-vintage') ? Number(g('nw-vintage')) : undefined;
+  const priceNum   = g('nw-price')   ? Number(g('nw-price'))   : undefined;
 
   const body = {
     fields: {
-      Name: name,
-      Producer: val('nw-producer') || undefined,
-      Vintage: val('nw-vintage') ? Number(val('nw-vintage')) : undefined,
-      Country: val('nw-country') || undefined,
-      Region: val('nw-region') || undefined,
-      Grape: val('nw-grape') || undefined,
-      'Label Image': val('nw-label-url') ? [{ url: val('nw-label-url') }] : undefined,
-      'Drinkable from': val('nw-drink-from') || undefined,
-      'Drinkable to': val('nw-drink-to') || undefined,
-      Price: val('nw-price') ? Number(val('nw-price')) : undefined
+      Name: g('nw-name') || undefined,
+      Producer: g('nw-producer') || undefined,
+      Vintage: isFinite(vintageNum) ? vintageNum : undefined,
+      Country: g('nw-country') || undefined,
+      Region:  g('nw-region')  || undefined,
+      Grape:   g('nw-grape')   || undefined,
+      'Label Image': g('nw-label-url') ? [{ url: g('nw-label-url') }] : undefined,
+      'Drinkable from': g('nw-drink-from') || undefined,
+      'Drinkable to':   g('nw-drink-to')   || undefined,
+      Price: isFinite(priceNum) ? priceNum : undefined
     }
   };
 
   try{
-    const r = await fetch(`https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify(body)
-    });
-    if (!r.ok){
-      const t = await r.text();
-      throw new Error(`Error saving wine: HTTP ${r.status} ${t}`);
+    // 1) Create wine
+    const wineRes = await fetch(
+      `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`,
+      { method:'POST', headers: headers(), body: JSON.stringify(body) }
+    );
+    if (!wineRes.ok){
+      const txt = await wineRes.text();
+      alert(`Error saving wine: HTTP ${wineRes.status}\n${txt}`);
+      return;
     }
-    const data = await r.json();
-    console.log('Saved wine:', data);
-    alert('Wine saved successfully!');
+    const wine = await wineRes.json();
+    const wineId = wine?.id;
 
-    modal.classList.remove('open');
+    // 2) Optional inventory
+    const qty = g('nw-qty') ? Number(g('nw-qty')) : undefined;
+    const locName = g('nw-location');
+    if (wineId && (qty || locName)){
+      // Find location by Name (must exist in Locations)
+      let locId = undefined;
+      if (locName){
+        const f = `FIND('${locName.replace(/'/g,"''")}',{Name})>0`;
+        const u = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(f)}&maxRecords=1`;
+        const lr = await fetch(u, { headers: headers() });
+        const lj = await lr.json();
+        locId = lj.records?.[0]?.id;
+      }
+
+      const invBody = {
+        fields: {
+          'Wine (Link to Wines)': [wineId],
+          'Location (Link to Locations)': locId ? [locId] : undefined,
+          Quantity: isFinite(qty) ? qty : undefined
+        }
+      };
+      await fetch(`https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}`, {
+        method:'POST', headers: headers(), body: JSON.stringify(invBody)
+      });
+    }
+
+    alert('Wine added!');
+    q('#add-modal')?.classList.remove('open');
     loadInventory();
   }catch(err){
-    alert(err.message);
+    alert(`Save error: ${err.message}`);
   }
 }
 
-// ---------- INVENTORY ----------
+// ---------- INVENTORY (no locations here) ----------
 async function loadInventory(){
   if (!S.base || !S.token) return;
-  q('#inventory').innerHTML = '<p class="badge">Loading…</p>';
-  try{
-    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100`;
-    const invRes = await fetch(invUrl, { headers: headers() });
-    const invData = await invRes.json();
 
-    if (!invData.records?.length){
+  try{
+    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=200`;
+    const res = await fetch(invUrl, { headers: headers() });
+    const data = await res.json();
+
+    if (!Array.isArray(data.records) || !data.records.length){
       q('#inventory').innerHTML = '<p class="badge">No inventory yet.</p>';
       return;
     }
 
-    const wineIDs = new Set();
-    const locIDs  = new Set();
-    for (const r of invData.records){
-      (r.fields['Wine (Link to Wines)'] || []).forEach(id => wineIDs.add(id));
-      (r.fields['Location (Link to Locations)'] || []).forEach(id => locIDs.add(id));
-    }
-
-    async function fetchNameMap(table, ids){
-      const arr = Array.from(ids);
-      const map = {};
-      for (let i = 0; i < arr.length; i += 50){
-        const chunk = arr.slice(i, i+50);
-        const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
-        const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(table)}?filterByFormula=${encodeURIComponent(formula)}&fields[]=Name&maxRecords=50`;
-        const res = await fetch(url, { headers: headers() });
-        const json = await res.json();
-        (json.records||[]).forEach(rec => map[rec.id] = rec.fields?.Name || rec.id);
-      }
-      return map;
-    }
-
-    const [wineMap, locMap] = await Promise.all([
-      fetchNameMap(S.wines, wineIDs),
-      fetchNameMap(S.loc, locIDs)
-    ]);
-
-    const out = invData.records.map(rec => {
+    // Build location map keyed by wine id for search tooltips
+    INV_BY_WINE.clear();
+    for (const rec of data.records){
       const f = rec.fields || {};
-      const wine = (f['Wine (Link to Wines)'] || []).map(id => wineMap[id] || id).join(', ');
-      const loc  = (f['Location (Link to Locations)'] || []).map(id => locMap[id]  || id).join(', ');
-      const qty  = f.Quantity ?? 0;
-      return `<div class="card"><b>${wine}</b><br/>📍 ${loc} — Qty: ${qty}</div>`;
+      const wineIds = f['Wine (Link to Wines)'] || [];
+      const qty = f.Quantity ?? 0;
+
+      // Optional Rack / Row fields if you store them in Inventory
+      const rack = f.Rack || '';
+      const row  = f.Row  || '';
+      for (const w of wineIds){
+        const arr = INV_BY_WINE.get(w) || [];
+        arr.push({ rack, row, qty });
+        INV_BY_WINE.set(w, arr);
+      }
+    }
+
+    // Render list: wine id -> name lookup
+    // Quick lookup names for first 50 unique wine IDs shown
+    const uniqueIds = [...INV_BY_WINE.keys()];
+    const showIds = new Set();
+    data.records.forEach(r => {
+      (r.fields['Wine (Link to Wines)'] || []).forEach(id => showIds.add(id));
+    });
+    const idList = [...showIds].slice(0, 50);
+
+    const nameMap = await fetchNames(S.wines, idList);
+    const out = data.records.map(r => {
+      const f = r.fields || {};
+      const firstId = (f['Wine (Link to Wines)'] || [])[0];
+      const wineName = nameMap[firstId] || firstId || '(Unknown wine)';
+      const qty = f.Quantity ?? 0;
+      return `<div class="card"><b>${wineName}</b><br/>Qty: ${qty}</div>`;
     }).join('');
 
     q('#inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
   }catch(err){
     q('#inventory').innerHTML = `<p class="badge">Inventory error: ${err.message}</p>`;
   }
+}
+
+async function fetchNames(table, ids){
+  const map = {};
+  if (!ids.length) return map;
+  for (let i=0;i<ids.length;i+=50){
+    const chunk = ids.slice(i, i+50);
+    const f = `OR(${chunk.map(id=>`RECORD_ID()='${id}'`).join(',')})`;
+    const u = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(table)}?filterByFormula=${encodeURIComponent(f)}&fields[]=Name&maxRecords=50`;
+    const r = await fetch(u, { headers: headers() });
+    const j = await r.json();
+    (j.records||[]).forEach(rec => map[rec.id] = rec.fields?.Name || rec.id);
+  }
+  return map;
 }
