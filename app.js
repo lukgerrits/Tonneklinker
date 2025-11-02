@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (v24) ----
+// ---- Tonneklinker app.js (v25) ----
 
 // Persistent settings
 const S = {
@@ -29,7 +29,6 @@ function saveSettings(){
 
 let _handlersBound = false;
 document.addEventListener('DOMContentLoaded', () => {
-  // populate
   const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
   set('#airtableBase', S.base);
   set('#airtableToken', S.token);
@@ -82,11 +81,14 @@ async function search(){
 
   const terms = raw.split(/\s+/).filter(Boolean);
 
-  // --- Server-side formula, now lowercase AND logic
-  const concat =
+  // --- Server-side formula (case-insensitive AND): use FIND()>0
+  // Lowercase both haystack and needle to make it case-insensitive
+  const concatLower =
     "LOWER(CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to}))";
-  const clauses = terms.map(t => `FIND(LOWER('${escAirtable(t)}'), ${concat})`);
-  const formula = `AND(${clauses.map(c => `NOT(ISERROR(${c}))`).join(',')})`;
+
+  // FIND returns 0 when not found (not an error). Check > 0!
+  const clauses = terms.map(t => `FIND(LOWER('${escAirtable(t)}'), ${concatLower}) > 0`);
+  const formula = clauses.length ? `AND(${clauses.join(',')})` : '1=1';
   const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   try{
@@ -102,7 +104,7 @@ async function search(){
     if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
 
-  // --- Fallback: client-side
+  // --- Fallback: client-side AND matching
   try{
     const r2 = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
     const data2 = await r2.json();
@@ -129,7 +131,7 @@ function renderSearchCards(records){
     if (val == null) return '';
     if (typeof val === 'object') {
       if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
-      if (val.value) return val.value;
+      if (val.value) return val.value;      // AI field shape
       if (val.text) return val.text;
       if (val.content) return val.content;
       if (val.name) return val.name;
@@ -140,11 +142,11 @@ function renderSearchCards(records){
     return String(val);
   };
 
-  // Country flag icons (simplified map)
+  // Country flag icons (simple map; extend as needed)
   const flagMap = {
     Frankrijk: '🇫🇷', Italië: '🇮🇹', Oostenrijk: '🇦🇹', Spanje: '🇪🇸',
     Duitsland: '🇩🇪', Portugal: '🇵🇹', VerenigdeStaten: '🇺🇸', Zwitserland: '🇨🇭',
-    België: '🇧🇪', Slovenië: '🇸🇮'
+    België: '🇧🇪', Slovenië: '🇸🇮', Griekenland: '🇬🇷', Oosten: '🌍'
   };
 
   const html = records.map(rec => {
@@ -155,8 +157,8 @@ function renderSearchCards(records){
     const labelImg = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
 
     const country = getText(f.Country);
-    const region = getText(f.Region);
-    const flag = flagMap[country] || '🌍';
+    const region  = getText(f.Region);
+    const flag    = flagMap[country] || '🌍';
     const countryRegion = [flag + ' ' + country, region].filter(Boolean).join(' – ');
 
     const chips = [
@@ -176,7 +178,6 @@ function renderSearchCards(records){
         <div class="wine-info">
           <b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}
           <div class="meta">${chips}</div>
-          ${f.Taste ? `<div class="taste-text">${getText(f.Taste)}</div>` : ''}
         </div>
       </div>`;
   }).join('');
