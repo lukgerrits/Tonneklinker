@@ -63,6 +63,7 @@ function norm(s){
 }
 
 let _searchAbort;
+
 async function search(){
   const termEl = q('#q');
   const raw = (termEl ? termEl.value : '').trim();
@@ -70,6 +71,7 @@ async function search(){
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
   if (!raw){ out.innerHTML = ''; return; }
 
+  // cancel any previous request
   try{ _searchAbort?.abort(); }catch(_){}
   _searchAbort = new AbortController();
 
@@ -78,32 +80,71 @@ async function search(){
 
   const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
   const headersObj = { headers: headers(), signal: _searchAbort.signal };
-
   const terms = raw.split(/\s+/).filter(Boolean);
-
-  // --- Server-side formula (case-insensitive AND): use FIND()>0
-  // Lowercase both haystack and needle to make it case-insensitive
   const concatLower =
     "LOWER(CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to}))";
 
-  // FIND returns 0 when not found (not an error). Check > 0!
-  const clauses = terms.map(t => `FIND(LOWER('${escAirtable(t)}'), ${concatLower}) > 0`);
-  const formula = clauses.length ? `AND(${clauses.join(',')})` : '1=1';
-  const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  async function fetchServer(isOR=false){
+    if (!terms.length) return { records: [] };
+    const pieces = terms.map(t => `FIND(LOWER('${escAirtable(t)}'), ${concatLower}) > 0`);
+    const formula = (isOR ? `OR(${pieces.join(',')})` : `AND(${pieces.join(',')})`);
+    const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+    const r = await fetch(url, headersObj);
+    return r.json();
+  }
+
+  function clientFilter(records, isOR=false){
+    const needlesAND = terms.map(norm);
+    const needlesOR  = needlesAND;
+    return (records||[]).filter(rec=>{
+      const f = rec.fields || {};
+      const hay = norm([
+        f.Name,f.Vintage,f.Country,f.Region,f.Grape,f.Taste,
+        f['Food Pairing'],f['Drinkable from'],f['Drinkable to']
+      ].filter(Boolean).join(' '));
+      if (isOR)  return needlesOR.some(t => hay.includes(t));
+      return needlesAND.every(t => hay.includes(t));
+    });
+  }
 
   try{
-    const r = await fetch(url, headersObj);
-    const data = await r.json();
+    // 1) Strict AND (server)
+    let data = await fetchServer(false);
     if (Array.isArray(data.records) && data.records.length){
       out.innerHTML = renderSearchCards(data.records);
       return;
     }
-  }catch(e){
-    if (e.name !== 'AbortError') console.warn('Server search failed:', e);
+
+    // 2) Strict AND (client)
+    const r2 = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
+    const data2 = await r2.json();
+    let rows = clientFilter(data2.records, false);
+    if (rows.length){
+      out.innerHTML = renderSearchCards(rows);
+      return;
+    }
+
+    // 3) Partial OR (server)
+    data = await fetchServer(true);
+    if (Array.isArray(data.records) && data.records.length){
+      out.innerHTML = `<p class="badge" style="margin-bottom:8px">Partial matches</p>` + renderSearchCards(data.records);
+      return;
+    }
+
+    // 4) Partial OR (client)
+    rows = clientFilter(data2.records, true);
+    out.innerHTML = rows.length
+      ? `<p class="badge" style="margin-bottom:8px">Partial matches</p>` + renderSearchCards(rows)
+      : '<p class="badge">No matches.</p>';
+
+  }catch(err){
+    if (err.name !== 'AbortError'){
+      out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
+    }
   }finally{
     if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
-
+}
   // --- Fallback: client-side AND matching
   try{
     const r2 = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
