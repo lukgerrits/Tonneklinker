@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (v43) ----
+// ---- Tonneklinker app.js (v44) ----
 
 // Persistent settings
 const S = {
@@ -141,7 +141,8 @@ function renderSearchCards(records){
     const country=getText(f.Country); const region=getText(f.Region);
     const flag=flagMap[country]||'🌍';
     const countryRegion=[flag+' '+country,region].filter(Boolean).join(' – ');
-
+    const grapeVal = f.Grape ?? f.Grapes ?? f['Grape(s)'] ?? f['Druif'] ?? null;
+    
     const chips=[
       countryRegion || null,
       grapeVal ? `🍇 ${getText(grapeVal)}` : null,
