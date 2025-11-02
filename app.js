@@ -72,18 +72,18 @@ async function search(){
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
   if (!raw){ out.innerHTML = ''; return; }
 
-  // Cancel any previous request
+  // cancel any previous request
   try { _searchAbort?.abort(); } catch(_) {}
   _searchAbort = new AbortController();
 
   const btn = q('#btn-search');
   if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
 
-  const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
+  const baseUrl   = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
   const headersObj = { headers: headers(), signal: _searchAbort.signal };
   const terms = raw.split(/\s+/).filter(Boolean);
 
-  // Build a safe CONCAT of searchable fields
+  // fields to search across (server)
   const concat =
     "CONCATENATE(" +
       "{Name},' '," +
@@ -97,74 +97,41 @@ async function search(){
       "{Drinkable to}" +
     ")";
 
-  // Server formula builder — strict AND or fallback OR
-  function serverFormula(isOR){
-    if (!terms.length) return '1=1';
-    const pieces = terms.map(t => `SEARCH('${escAirtable(t)}', ${concat})`);
-    // SEARCH returns a number or blank; check if >0 for match
-    return isOR
-      ? `OR(${pieces.map(p => `${p}>0`).join(',')})`
-      : `AND(${pieces.map(p => `${p}>0`).join(',')})`;
-  }
+  // SERVER: case-insensitive AND using SEARCH()>0
+  const pieces  = terms.map(t => `SEARCH('${escAirtable(t)}', ${concat}) > 0`);
+  const formula = pieces.length ? `AND(${pieces.join(',')})` : '1=1';
+  const url     = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
-  async function fetchServer(isOR){
-    const formula = serverFormula(isOR);
-    const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  try{
+    // 1) AND (server)
     const r = await fetch(url, headersObj);
-    if (!r.ok){
-      console.warn('Airtable error', r.status, await r.text().catch(()=>r.statusText));
-      return { records: [] };
-    }
-    return r.json();
-  }
-
-  function clientFilter(records, isOR){
-    const needles = terms.map(norm);
-    return (records||[]).filter(rec=>{
-      const f = rec.fields || {};
-      const hay = norm([
-        f.Name,f.Vintage,f.Country,f.Region,f.Grape,f.Taste,
-        f['Food Pairing'],f['Drinkable from'],f['Drinkable to']
-      ].filter(Boolean).join(' '));
-      return isOR ? needles.some(t => hay.includes(t)) : needles.every(t => hay.includes(t));
-    });
-  }
-
-  try {
-    // --- 1️⃣ Try AND (strict) — SERVER first
-    let data = await fetchServer(false);
+    const data = r.ok ? await r.json() : { records: [] };
     if (Array.isArray(data.records) && data.records.length){
       out.innerHTML = renderSearchCards(data.records);
       return;
     }
 
-    // --- 2️⃣ Try AND (strict) — CLIENT fallback
-    const allRes = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
-    const allData = await allRes.json();
-    let rows = clientFilter(allData.records, false);
-    if (rows.length){
-      out.innerHTML = renderSearchCards(rows);
-      return;
-    }
+    // 2) AND (client) fallback on a broader fetch
+    const rAll = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
+    const all  = rAll.ok ? await rAll.json() : { records: [] };
+    const needles = terms.map(norm);
+    const rows = (all.records||[]).filter(rec=>{
+      const f = rec.fields || {};
+      const hay = norm([
+        f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Taste,
+        f['Food Pairing'], f['Drinkable from'], f['Drinkable to']
+      ].filter(Boolean).join(' '));
+      return needles.every(t => hay.includes(t)); // AND only
+    });
 
-    // --- 3️⃣ Try OR (partial) only if nothing else matched
-    data = await fetchServer(true);
-    if (Array.isArray(data.records) && data.records.length){
-      out.innerHTML = `<p class="badge" style="margin-bottom:8px">Partial matches</p>` + renderSearchCards(data.records);
-      return;
-    }
+    out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
 
-    rows = clientFilter(allData.records, true);
-    out.innerHTML = rows.length
-      ? `<p class="badge" style="margin-bottom:8px">Partial matches</p>` + renderSearchCards(rows)
-      : '<p class="badge">No matches.</p>';
-
-  } catch (err){
+  }catch(err){
     if (err.name !== 'AbortError'){
       console.error(err);
       out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
     }
-  } finally {
+  }finally{
     if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
 }
