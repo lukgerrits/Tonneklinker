@@ -1,17 +1,58 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Tonneklinker</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tonneklinker · Cellar</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
+  <meta name="theme-color" content="#5A082E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- ===== Tonneklinker Header + Add Wine Modal ===== -->
+  <header style="display:flex;align-items:center;gap:12px;padding:8px 12px;">
+    <img class="logo" src="icon-192.png?v=30" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px"/>
+    <h1 style="margin-right:auto;font-size:1.4rem;">Tonneklinker · Cellar</h1>
+    <button id="btn-open-add" class="btn">+ Add Wine</button>
+    <nav style="margin-left:8px"><a href="./mobile.html" class="badge">Mobile</a></nav>
+  </header>
 
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="apple-touch-icon" href="./icon-180.png">
-  <meta name="theme-color" content="#5A0E2E"/>
-  <link rel="stylesheet" href="./styles.css">
+  <main class="container">
+    <section class="card">
+      <h2>Search Wines</h2>
+      <div class="grid cols-2">
+        <input id="q" placeholder="Search by name, producer, grape, vintage…" />
+        <button id="btn-search" class="btn">Search</button>
+      </div>
+      <div id="results" style="margin-top:12px;"></div>
+    </section>
 
+    <section class="card">
+      <h2>Inventory</h2>
+      <div id="inventory"><p class="badge">Loading...</p></div>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <div class="grid cols-2">
+        <input id="airtableBase" placeholder="Airtable Base ID" />
+        <input id="airtableToken" placeholder="Airtable Personal Access Token" />
+        <input id="winesTable" value="Wines" placeholder="Wines Table" />
+        <input id="inventoryTable" value="Inventory" placeholder="Inventory Table" />
+        <input id="locationsTable" value="Locations" placeholder="Locations Table" />
+        <button id="btn-save" class="btn">Save</button>
+      </div>
+      <p class="badge" style="margin-top:12px;">Your token is stored locally on this device only.</p>
+    </section>
+  </main>
+
+  <footer style="text-align:center;margin:30px 0;">
+    © Tonneklinker
+  </footer>
+
+  <!-- ===== Add Wine Modal ===== -->
   <style>
-    /* --- Add Wine Modal Styling --- */
     .modal {
       position: fixed;
       inset: 0;
@@ -76,23 +117,10 @@
       color: #aaa;
     }
   </style>
-</head>
 
-<body>
-  <!-- ===== Tonneklinker Header + Add Wine Modal ===== -->
-  <header style="display:flex;align-items:center;gap:12px;padding:8px 12px;">
-    <img class="logo" src="icon-192.png?v=31" alt="Tonneklinker"
-         style="width:42px;height:42px;border-radius:8px"/>
-    <h1 style="margin-right:auto;font-size:1.4rem;">Tonneklinker · Cellar</h1>
-    <button id="btn-open-add" class="btn">+ Add Wine</button>
-    <nav style="margin-left:8px"><a href="./mobile.html" class="badge">Mobile</a></nav>
-  </header>
-
-  <!-- Modal for Adding New Wine -->
   <div id="add-modal" class="modal" aria-hidden="true">
     <div class="card">
       <h3>+ Add Wine</h3>
-
       <div class="grid2">
         <input id="nw-name" placeholder="Name *" />
         <input id="nw-vintage" placeholder="Vintage (e.g. 2018)" />
@@ -101,69 +129,26 @@
         <input id="nw-grape" placeholder="Grape (e.g. Nebbiolo)" />
         <input id="nw-label-url" placeholder="Label Image URL (optional)" />
       </div>
-
       <div class="grid3" style="margin-top:10px;">
         <input id="nw-drink-from" placeholder="Drinkable from (e.g. 2025)" />
         <input id="nw-drink-to" placeholder="Drinkable to (e.g. 2030)" />
         <input id="nw-price" placeholder="Price (e.g. 39.95)" />
       </div>
-
       <h4 style="margin:16px 0 8px;">Inventory (optional)</h4>
       <div class="grid2">
         <input id="nw-location" placeholder="Location / Rack (e.g. Rack 1)" />
         <input id="nw-qty" placeholder="Quantity (e.g. 3)" />
       </div>
-
       <div class="actions">
         <button id="btn-cancel-add" class="btn btn-secondary">Cancel</button>
         <button id="btn-save-add" class="btn">Save</button>
       </div>
-
       <p class="badge" style="margin-top:12px;text-align:center;">
         Taste & Food Pairing will be generated automatically by Airtable AI (in Dutch).
       </p>
     </div>
   </div>
-  <!-- ===== End Add Wine Modal ===== -->
 
-  <!-- ===== MAIN APP ===== -->
-  <main class="container">
-    <section class="card">
-      <h2>Search Wines</h2>
-      <div class="grid cols-2">
-        <input id="q" placeholder="Search by name, grape, region, etc…"/>
-        <button id="btn-search">Search</button>
-      </div>
-      <div id="results" style="margin-top:12px"></div>
-    </section>
-
-    <section class="card">
-      <h2>Inventory</h2>
-      <div id="inventory"></div>
-    </section>
-
-    <section class="card">
-      <h2>Settings</h2>
-      <div class="grid cols-2">
-        <input id="airtableBase" placeholder="Airtable Base ID"/>
-        <input id="airtableToken" placeholder="Airtable Personal Access Token"/>
-        <input id="winesTable" value="Wines" placeholder="Wines table"/>
-        <input id="inventoryTable" value="Inventory" placeholder="Inventory table"/>
-        <input id="locationsTable" value="Locations" placeholder="Locations table"/>
-        <button id="btn-save">Save</button>
-      </div>
-      <p class="badge">Your token is stored locally on this device only.</p>
-    </section>
-  </main>
-
-  <footer style="text-align:center;padding:10px;color:#777;">© Tonneklinker</footer>
-
-  <!-- ===== SCRIPTS ===== -->
-  <script src="./app.js?v=32"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./service-worker.js');
-    }
-  </script>
+  <script src="./app.js?v=31"></script>
 </body>
 </html>
