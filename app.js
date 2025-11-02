@@ -1,6 +1,5 @@
-// ---- Tonneklinker app.js (full) ----
+// ---- Tonneklinker app.js (robust multi-word search + AI-field fix) ----
 
-// Local settings (persisted in localStorage)
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
   set base(v){ localStorage.setItem('tk_base', v); },
@@ -17,7 +16,7 @@ const S = {
 const q = (sel) => document.querySelector(sel);
 const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
 
-// ---------- SETTINGS UI ----------
+// ---------- SETTINGS ----------
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -28,7 +27,6 @@ function saveSettings(){
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // hydrate inputs
   const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
   set('#airtableBase', S.base);
   set('#airtableToken', S.token);
@@ -43,11 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInventory();
 });
 
-// ---------- SEARCH (multi-term AND; server first, client fallback) ----------
+// ---------- SEARCH ----------
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
 function norm(s){
   return String(s||'')
-    .normalize('NFD')                  // remove accents (é → e)
+    .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase();
 }
@@ -61,14 +59,12 @@ async function search(){
 
   const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
   const headersObj = { headers: headers() };
-
-  // Split into terms (AND logic, natural language)
   const terms = raw.split(/\s+/).filter(Boolean);
-  console.log('Search terms:', terms);
 
-  // --- 1) Server-side attempt: AND(SEARCH('t1', CONCAT...), SEARCH('t2', CONCAT...), ...)
+  // ---- SERVER-SIDE ATTEMPT ----
   const concatFields = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})";
-  const formulaParts = terms.map(t => `SEARCH('${escAirtable(t)}', ${concatFields})`);
+  // safer SEARCH: wrap each in ISERROR()=FALSE() to avoid formula breakage
+  const formulaParts = terms.map(t => `NOT(ISERROR(SEARCH('${escAirtable(t)}', ${concatFields})))`);
   const formula = formulaParts.length === 1 ? formulaParts[0] : `AND(${formulaParts.join(',')})`;
   const serverUrl = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
   console.log('SERVER SEARCH →', serverUrl);
@@ -84,7 +80,7 @@ async function search(){
     console.warn('Server search failed — falling back to client-side search:', e);
   }
 
-  // --- 2) Client-side fallback: accent-insensitive AND across fields
+  // ---- CLIENT-SIDE FALLBACK ----
   try{
     const r2 = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
     const data2 = await r2.json();
@@ -95,7 +91,7 @@ async function search(){
         f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Taste,
         f['Food Pairing'], f['Drinkable from'], f['Drinkable to']
       ].filter(Boolean).join(' '));
-      return needles.every(t => hay.includes(t)); // all words must match
+      return needles.every(t => hay.includes(t));
     });
     out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
   }catch(err){
@@ -103,15 +99,19 @@ async function search(){
   }
 }
 
-// ---------- RENDER (no [object Object], safe arrays/attachments) ----------
+// ---------- RENDER ----------
 function renderSearchCards(records){
   const getText = (val) => {
     if (val == null) return '';
     if (Array.isArray(val)){
-      return val.map(v => (typeof v === 'string') ? v : (v.name || v.url || '')).filter(Boolean).join(', ');
+      return val.map(v => {
+        if (typeof v === 'string') return v;
+        if (typeof v === 'object') return v.name || v.text || v.content || v.url || '';
+        return String(v);
+      }).filter(Boolean).join(', ');
     }
     if (typeof val === 'object'){
-      return val.name || val.url || '';
+      return val.name || val.text || val.content || val.url || '';
     }
     return String(val);
   };
@@ -148,12 +148,11 @@ function renderSearchCards(records){
   return html || '<p class="badge">No matches.</p>';
 }
 
-// ---------- INVENTORY (resolve linked record IDs → Names) ----------
+// ---------- INVENTORY ----------
 async function loadInventory(){
   if (!S.base || !S.token) return;
 
   try{
-    // 1) Load inventory rows
     const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100`;
     const invRes = await fetch(invUrl, { headers: headers() });
     const invData = await invRes.json();
@@ -163,7 +162,6 @@ async function loadInventory(){
       return;
     }
 
-    // 2) Collect unique IDs from linked fields
     const wineIDs = new Set();
     const locIDs  = new Set();
     for (const r of invData.records){
@@ -171,7 +169,6 @@ async function loadInventory(){
       (r.fields['Location (Link to Locations)'] || []).forEach(id => locIDs.add(id));
     }
 
-    // 3) Batch resolve names
     async function fetchNameMap(tableName, ids){
       const arr = Array.from(ids);
       const map = {};
@@ -191,7 +188,6 @@ async function loadInventory(){
       fetchNameMap(S.loc,   locIDs)
     ]);
 
-    // 4) Render inventory cards with readable names
     const out = invData.records.map(rec => {
       const f = rec.fields || {};
       const wine = (f['Wine (Link to Wines)'] || []).map(id => wineMap[id] || id).join(', ');
