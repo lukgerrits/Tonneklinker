@@ -314,7 +314,7 @@ async function loadInventory(){
     const out = STATE.invRecords.map(rec => {
       const f = rec.fields || {};
       const wine = (f['Wine (Link to Wines)'] || []).map(id => wineMap[id] || id).join(', ');
-      const loc  = (f['Location (Link to Locations)'] || []).map(id => locMap[id]  || id).join(', ');
+      const loc  = (f['Location (Link to Locations)'] || []).map(id => STATE.locMap[id] || locMap[id] || id).join(', ');
       const qty  = f.Quantity ?? 0;
       return `<div class="card"><b>${wine || '(unknown wine)'}</b><br/>📍 ${loc || 'Unassigned'} — Qty: ${qty}</div>`;
     }).join('');
