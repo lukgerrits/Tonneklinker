@@ -1,126 +1,93 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Tonneklinker</title>
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="apple-touch-icon" href="./icon-180.png">
-  <meta name="theme-color" content="#5A0E2E"/>
-  <link rel="stylesheet" href="./styles.css">
-  <style>
-    /* --- Minimal extras used by modal + toast + badges --- */
-    .btn{background:linear-gradient(90deg,#6b1437,#0f6a68);color:#fff;border:none;border-radius:12px;padding:10px 16px;cursor:pointer}
-    .btn:hover{opacity:.9}
-    .btn-secondary{background:#2a2a2a}
-    .badge{background:#222;border:1px solid #333;border-radius:10px;padding:4px 8px;color:#aaa;margin-right:6px;display:inline-block}
-    .badge-loc{cursor:pointer}
-    .card{background:#0f0f10;border:1px solid #262626;border-radius:16px;padding:14px;margin:10px 0}
-    header{display:flex;align-items:center;gap:12px;padding:8px 12px}
-    .logo{width:42px;height:42px;border-radius:8px}
-    .container{max-width:1100px;margin:0 auto;padding:12px}
-    h1,h2{margin:6px 0}
-    .grid{display:grid;gap:12px}
-    .cols-2{grid-template-columns:1fr 1fr}
-    input{background:#1b1b1b;color:#eee;border:1px solid #333;border-radius:10px;padding:10px;width:100%}
-    /* Modal */
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000}
-    .modal.open{display:flex}
-    /* Toast */
-    #tk-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);
-      background:#222;color:#fff;border:1px solid #333;border-radius:10px;
-      padding:10px 14px;opacity:0;transition:opacity .25s;z-index:9999}
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tonneklinker · Cellar</title>
+  <link rel="icon" type="image/png" href="icon-192.png?v=47" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css?v=47" />
 </head>
+
 <body>
-  <!-- Header -->
-  <header>
-    <img class="logo" src="icon-192.png?v=46" alt="Tonneklinker"/>
-    <h1 style="margin-right:auto">Tonneklinker · Cellar</h1>
+  <!-- ===== Header ===== -->
+  <header style="display:flex;align-items:center;gap:12px;padding:8px 12px;">
+    <img class="logo" src="icon-192.png?v=47" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px;" />
+    <h1 style="margin-right:auto;font-size:1.4rem;">Tonneklinker · Cellar</h1>
     <button id="btn-open-add" class="btn">+ Add Wine</button>
-    <nav style="margin-left:8px"><a href="./mobile.html" class="badge">Mobile</a></nav>
+    <nav style="margin-left:8px;">
+      <a href="./mobile.html" class="badge">Mobile</a>
+    </nav>
   </header>
 
+  <!-- ===== Main Container ===== -->
   <main class="container">
-    <!-- Search -->
+    <!-- === Search Section === -->
     <section class="card">
       <h2>Search Wines</h2>
       <div class="grid cols-2">
-        <input id="q" placeholder="Search by name, producer, grape, vintage…"/>
+        <input id="q" placeholder="Search by name, producer, grape, vintage…" />
         <button id="btn-search" class="btn">Search</button>
       </div>
-      <div id="results" style="margin-top:12px"></div>
+      <div id="results" style="margin-top:12px;"></div>
     </section>
 
-    <!-- Cellar map hint (kept minimal for now) -->
+    <!-- === Cellar Map (Visual Placeholder) === -->
     <section class="card">
       <h2>Cellar Map</h2>
-      <p class="badge">Tap a 📍 pin in search results to see the rack/row. Hover for tooltip.</p>
+      <p class="badge">Tap a row to see wines. Green = has bottles.</p>
+      <div id="cellar-map" style="margin-top:8px;"></div>
     </section>
 
-    <!-- Inventory (just a simple list; no locations here) -->
-    <section class="card">
-      <h2>Inventory</h2>
-      <div id="inventory">Loading…</div>
-    </section>
-
-    <!-- Settings -->
+    <!-- === Settings Section === -->
     <section class="card">
       <h2>Settings</h2>
       <div class="grid cols-2">
-        <input id="airtableBase" placeholder="Airtable Base ID"/>
-        <input id="airtableToken" placeholder="Airtable Personal Access Token"/>
-        <input id="winesTable" value="Wines" placeholder="Wines table"/>
-        <input id="inventoryTable" value="Inventory" placeholder="Inventory table"/>
-        <input id="locationsTable" value="Locations" placeholder="Locations table"/>
-        <button id="btn-save" class="btn">Save</button>
+        <input id="airtableBase" placeholder="Airtable Base ID" />
+        <input id="airtableToken" placeholder="Airtable Personal Access Token" />
+        <input id="winesTable" placeholder="Wines table name" />
+        <input id="inventoryTable" placeholder="Inventory table name" />
+        <input id="locationsTable" placeholder="Locations table name" />
       </div>
-      <p class="badge" style="margin-top:8px">Your token is stored locally on this device only.</p>
+      <button id="btn-save" class="btn" style="margin-top:10px;">Save</button>
+      <p class="badge" style="margin-top:10px;">Your token is stored locally on this device only.</p>
     </section>
   </main>
 
   <!-- ===== Add Wine Modal ===== -->
-  <div id="add-modal" class="modal" aria-hidden="true">
-    <div class="card" style="max-width:760px;width:92%">
+  <div id="add-modal" class="modal">
+    <div class="modal-content card">
       <h3>+ Add Wine</h3>
-
       <div class="grid cols-2">
-        <input id="nw-name" placeholder="Name *"/>
-        <input id="nw-vintage" placeholder="Vintage (e.g. 2019)"/>
-        <input id="nw-producer" placeholder="Producer (e.g. Pietroso)"/>
-        <input id="nw-country" placeholder="Country (e.g. Italië)"/>
-        <input id="nw-region" placeholder="Region (e.g. Toscane)"/>
-        <input id="nw-grape" placeholder="Grape (e.g. Sangiovese)"/>
-        <input id="nw-label-url" placeholder="Label Image URL (optional)"/>
+        <input id="nw-name" placeholder="Name *" />
+        <input id="nw-vintage" placeholder="Vintage (e.g. 2019)" />
+        <input id="nw-producer" placeholder="Producer (e.g. Pietroso)" />
+        <input id="nw-country" placeholder="Country" />
+        <input id="nw-region" placeholder="Region" />
+        <input id="nw-grape" placeholder="Grape (e.g. Nebbiolo)" />
+        <input id="nw-label-url" placeholder="Label Image URL (optional)" />
+        <input id="nw-price" placeholder="Price (e.g. 39.95)" />
+        <input id="nw-drink-from" placeholder="Drinkable from (e.g. 2025)" />
+        <input id="nw-drink-to" placeholder="Drinkable to (e.g. 2032)" />
       </div>
 
-      <div class="grid cols-2" style="margin-top:10px">
-        <input id="nw-drink-from" placeholder="Drinkable from (e.g. 2026)"/>
-        <input id="nw-drink-to" placeholder="Drinkable to (e.g. 2032)"/>
-        <input id="nw-price" placeholder="Price (e.g. 39.95)"/>
-      </div>
-
-      <h4 style="margin:14px 0 8px">Inventory (optional)</h4>
+      <h4 style="margin-top:10px;">Inventory (optional)</h4>
       <div class="grid cols-2">
-        <input id="nw-location" placeholder="Location / Rack (e.g. Rack 1 Row 5)"/>
-        <input id="nw-qty" placeholder="Quantity (e.g. 3)"/>
+        <input id="nw-location" placeholder="Location / Rack (e.g. Rack 1 Row 5)" />
+        <input id="nw-qty" placeholder="Quantity (e.g. 3)" />
       </div>
 
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
-        <button id="btn-cancel-add" class="btn btn-secondary">Cancel</button>
+      <div class="grid cols-2" style="margin-top:12px;">
+        <button id="btn-cancel-add" class="btn btn-alt">Cancel</button>
         <button id="btn-save-add" class="btn">Save</button>
       </div>
 
-      <p class="badge" style="margin-top:12px;text-align:center">
-        Taste & Food Pairing will be generated automatically by Airtable AI (in Dutch).
-      </p>
+      <p class="badge" style="margin-top:10px;">Taste & Food Pairing will be generated automatically by Airtable AI (in Dutch).</p>
     </div>
   </div>
-  <!-- ===== End Modal ===== -->
 
-  <div id="tk-toast"></div>
+  <footer style="text-align:center;margin:20px;">© Tonneklinker</footer>
 
-  <script src="./app.js?v=46"></script>
-  <script>if('serviceWorker' in navigator){ navigator.serviceWorker.register('./service-worker.js'); }</script>
+  <script src="app.js?v=47"></script>
 </body>
 </html>
