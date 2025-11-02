@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (v47) ----
+// ---- Tonneklinker app.js (v48) ----
 
 // Persistent settings
 const S = {
@@ -14,16 +14,8 @@ const S = {
   set loc(v){ localStorage.setItem('tk_loc', v); }
 };
 
-const q = (sel) => document.querySelector(sel);
+const q = sel => document.querySelector(sel);
 const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
-
-// --- toast helper ---
-function toast(msg, ms=1600){
-  let t = document.getElementById('tk-toast');
-  if(!t){ t = document.createElement('div'); t.id='tk-toast'; document.body.appendChild(t); }
-  t.textContent = msg; t.style.opacity=1;
-  setTimeout(()=>{ t.style.opacity=0; }, ms);
-}
 
 // ---------- SETTINGS ----------
 function saveSettings(){
@@ -32,10 +24,11 @@ function saveSettings(){
   S.wines = q('#winesTable').value.trim();
   S.inv   = q('#inventoryTable').value.trim();
   S.loc   = q('#locationsTable').value.trim();
-  toast('Saved.');
+  alert('Saved locally.');
 }
 
 let _handlersBound = false;
+
 document.addEventListener('DOMContentLoaded', () => {
   const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
   set('#airtableBase', S.base);
@@ -59,33 +52,37 @@ document.addEventListener('DOMContentLoaded', () => {
       searchInput.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
     }
 
-    // Add modal wiring
-    const openAdd = q('#btn-open-add');
+    // Add Wine modal
     const modal = q('#add-modal');
-    const cancelAdd = q('#btn-cancel-add');
-    const saveAdd = q('#btn-save-add');
-
-    if (openAdd && modal) openAdd.addEventListener('click', ()=>{ modal.classList.add('open'); });
-    if (cancelAdd && modal) cancelAdd.addEventListener('click', ()=>{ modal.classList.remove('open'); });
-    if (saveAdd && modal) saveAdd.addEventListener('click', saveNewWine);
-
-    // location pin event (hover & click)
-    const resultsEl = q('#results');
-    if (resultsEl){
-      resultsEl.addEventListener('mouseenter', handlePinEvent, true);
-      resultsEl.addEventListener('click', handlePinEvent, true);
-    }
+    q('#btn-open-add')?.addEventListener('click', ()=>{
+      modal.style.display = 'block';
+      modal.setAttribute('aria-hidden','false');
+    });
+    q('#btn-cancel-add')?.addEventListener('click', ()=>{
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden','true');
+    });
+    q('#btn-save-add')?.addEventListener('click', saveNewWine);
 
     _handlersBound = true;
   }
+
+  // (No inventory list to load anymore)
 });
 
-// ---------- SEARCH ----------
+// ---------- UTIL ----------
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
 function norm(s){
   return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
 }
+function chip(text){ return `<span class="badge">${text}</span>`; }
+function euro(p){
+  if (p == null || p === '') return '';
+  const n = Number(p);
+  return isFinite(n) ? `€ ${n.toFixed(2)}` : p;
+}
 
+// ---------- SEARCH ----------
 let _searchAbort;
 
 async function search(){
@@ -103,10 +100,9 @@ async function search(){
   if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
 
   const baseUrl   = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
-  const h         = { headers: headers(), signal: _searchAbort.signal };
-  const terms     = raw.split(/\s+/).filter(Boolean);
+  const headersObj = { headers: headers(), signal: _searchAbort.signal };
+  const terms = raw.split(/\s+/).filter(Boolean);
 
-  // Fields to search across (server) – includes Producer now
   const concat =
     "CONCATENATE(" +
       "{Name},' '," +
@@ -121,25 +117,23 @@ async function search(){
       "{Drinkable to}" +
     ")";
 
-  // SERVER: case-insensitive AND using SEARCH()>0
-  const pieces  = terms.map(t => `SEARCH(LOWER('${escAirtable(t)}'), LOWER(${concat})) > 0`);
+  // AND search (server)
+  const pieces  = terms.map(t => `SEARCH('${escAirtable(t)}', ${concat}) > 0`);
   const formula = pieces.length ? `AND(${pieces.join(',')})` : '1=1';
   const url     = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   try{
-    // 1) AND (server)
-    const r = await fetch(url, h);
-    if (!r.ok) throw new Error(`Airtable ${r.status}`);
-    const data = await r.json();
+    const r = await fetch(url, headersObj);
+    const data = r.ok ? await r.json() : { records: [] };
     if (Array.isArray(data.records) && data.records.length){
       out.innerHTML = renderSearchCards(data.records);
+      bindCellarChips(data.records);
       return;
     }
 
-    // 2) AND (client) fallback on a broader fetch
-    const rAll = await fetch(`${baseUrl}?maxRecords=200`, h);
-    if (!rAll.ok) throw new Error(`Airtable ${rAll.status}`);
-    const all  = await rAll.json();
+    // Client-side AND fallback
+    const rAll = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
+    const all  = rAll.ok ? await rAll.json() : { records: [] };
     const needles = terms.map(norm);
     const rows = (all.records||[]).filter(rec=>{
       const f = rec.fields || {};
@@ -147,10 +141,11 @@ async function search(){
         f.Name, f.Producer, f.Vintage, f.Country, f.Region, f.Grape, f.Taste,
         f['Food Pairing'], f['Drinkable from'], f['Drinkable to']
       ].filter(Boolean).join(' '));
-      return needles.every(t => hay.includes(t)); // AND only
+      return needles.every(t => hay.includes(t));
     });
 
     out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
+    if (rows.length) bindCellarChips(rows);
 
   }catch(err){
     if (err.name !== 'AbortError'){
@@ -160,85 +155,6 @@ async function search(){
   }finally{
     if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
-}
-
-// ---------- LOCATION PIN (fetch on demand) ----------
-const LOC_CACHE = Object.create(null);
-
-async function handlePinEvent(e){
-  const pin = e.target.closest('.badge-loc');
-  if (!pin) return;
-
-  // On hover: only set title if not loaded yet
-  // On click: also show an alert
-  const wineId = pin.getAttribute('data-wine');
-  if (!wineId) return;
-
-  try{
-    const info = await getLocationInfoForWine(wineId);
-    if (info) {
-      pin.title = info;
-      if (e.type === 'click') alert(info);
-    } else {
-      pin.title = 'No cellar location';
-      if (e.type === 'click') alert('No cellar location found.');
-    }
-  }catch(err){
-    console.warn(err);
-    pin.title = 'Error loading location';
-    if (e.type === 'click') alert('Error loading location');
-  }
-}
-
-async function getLocationInfoForWine(wineId){
-  if (LOC_CACHE[wineId]) return LOC_CACHE[wineId];
-
-  // Find Inventory rows linking this wine
-  const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}`
-    + `?filterByFormula=${encodeURIComponent(`FIND('${wineId}', ARRAYJOIN({Wine (Link to Wines)}))`)}&maxRecords=50`;
-
-  const invRes = await fetch(invUrl, { headers: headers() });
-  if (!invRes.ok) throw new Error(`Inventory ${invRes.status}`);
-  const invData = await invRes.json();
-
-  const locIds = new Set();
-  const qtyByLoc = {};
-  (invData.records||[]).forEach(r=>{
-    const locs = r.fields?.['Location (Link to Locations)'] || [];
-    const qty  = r.fields?.Quantity ?? 0;
-    locs.forEach(id => { locIds.add(id); qtyByLoc[id] = (qtyByLoc[id]||0) + (Number(qty)||0); });
-  });
-
-  if (!locIds.size){
-    LOC_CACHE[wineId] = '';
-    return '';
-  }
-
-  // Fetch Locations detail in one batch
-  const ids = Array.from(locIds);
-  const locFormula = `OR(${ids.map(id=>`RECORD_ID()='${id}'`).join(',')})`;
-  const locUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}`
-    + `?filterByFormula=${encodeURIComponent(locFormula)}&maxRecords=50`;
-
-  const locRes = await fetch(locUrl, { headers: headers() });
-  if (!locRes.ok) throw new Error(`Locations ${locRes.status}`);
-  const locData = await locRes.json();
-
-  const parts = (locData.records||[]).map(l=>{
-    const f = l.fields||{};
-    const rack = f.Rack || '';
-    const row  = f.Row  || '';
-    const nm   = f.Name || '';
-    const qty  = qtyByLoc[l.id] || 0;
-    const segs = [nm || [rack,row].filter(Boolean).join(' / ')].filter(Boolean);
-    if (rack || row) segs.push([rack,row].filter(Boolean).join(' · '));
-    if (qty) segs.push(`Qty ${qty}`);
-    return segs.join(' — ');
-  });
-
-  const info = parts.join('  |  ');
-  LOC_CACHE[wineId] = info;
-  return info;
 }
 
 // ---------- RENDER ----------
@@ -263,8 +179,8 @@ function renderSearchCards(records){
     België: '🇧🇪', Slovenië: '🇸🇮', Griekenland: '🇬🇷'
   };
 
-  const html = records.map(rec=>{
-    const f = rec.fields||{};
+  const html = records.map(rec => {
+    const f = rec.fields || {};
     const imgUrl = Array.isArray(f['Label Image'])
       ? f['Label Image'][0]?.url
       : (f['Label Image']?.url || '');
@@ -275,27 +191,33 @@ function renderSearchCards(records){
     const flag    = flagMap[country] || '🌍';
     const countryRegion = [flag + ' ' + country, region].filter(Boolean).join(' – ');
 
+    const topLine = `<b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}`;
+
     const chips = [
       countryRegion || null,
+      f.Producer ? `🏷️ ${getText(f.Producer)}` : null,
       f.Grape ? `🍇 ${getText(f.Grape)}` : null,
       f.Taste ? `👅 ${getText(f.Taste)}` : null,
       f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
       (f['Drinkable from'] || f['Drinkable to'])
         ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
-      (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null,
-      // cellar pin (loads on demand)
-      `<span class="badge badge-loc" data-wine="${rec.id}" title="Show cellar location">📍 cellar</span>`
-    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
+      (f.Price !== '' && f.Price != null) ? `💶 ${euro(f.Price)}` : null,
+      `<span class="badge cellar-chip" data-wine="${rec.id}" style="cursor:pointer;">📍 cellar</span>`
+    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`.replace('<span class="badge"><span class="badge','<span class="badge')).join(' ');
 
-    const titleLine = `<b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}`;
+    // NOTE: The cellar chip already includes its own class/attributes
+    const chipsHtml = chips.replace(
+      '<span class="badge"><span class="badge cellar-chip"',
+      '<span class="badge cellar-chip"'
+    );
 
     return `
       <div class="card wine-card">
         ${labelImg}
         <div class="wine-info">
-          ${titleLine}
-          <div class="meta" style="margin-top:6px">${chips}</div>
+          ${topLine}
+          <div class="meta">${chipsHtml}</div>
         </div>
       </div>`;
   }).join('');
@@ -303,99 +225,221 @@ function renderSearchCards(records){
   return html || '<p class="badge">No matches.</p>';
 }
 
+// ---------- CELLAR LOOKUP (for search cards) ----------
+function bindCellarChips(records){
+  const chips = document.querySelectorAll('.cellar-chip');
+  const tooltip = q('#cellar-tooltip');
+
+  function hideTip(){ tooltip.style.display='none'; }
+
+  chips.forEach(chip => {
+    const wineId = chip.getAttribute('data-wine');
+    let cachedHtml = null;
+
+    const show = async (evt) => {
+      if (!cachedHtml){
+        cachedHtml = await cellarInfoHtmlForWine(wineId);
+        if (!cachedHtml) {
+          // nothing to show: keep silent
+          return;
+        }
+      }
+      tooltip.innerHTML = cachedHtml;
+      const rect = chip.getBoundingClientRect();
+      tooltip.style.left = `${rect.left + window.scrollX}px`;
+      tooltip.style.top  = `${rect.bottom + window.scrollY + 6}px`;
+      tooltip.style.display = 'inline-block';
+    };
+
+    chip.addEventListener('mouseenter', show);
+    chip.addEventListener('mouseleave', hideTip);
+    chip.addEventListener('click', (e)=>{ e.stopPropagation(); show(e); });
+  });
+
+  document.addEventListener('scroll', ()=>{ tooltip.style.display='none'; }, { passive:true });
+  document.addEventListener('click', (e)=>{
+    if (!e.target.classList.contains('cellar-chip')){
+      tooltip.style.display='none';
+    }
+  });
+}
+
+async function cellarInfoHtmlForWine(wineId){
+  // 1) Find Inventory rows that include this wineId in link field
+  const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}`
+    + `?filterByFormula=${encodeURIComponent(`FIND('${wineId}', ARRAYJOIN({Wine (Link to Wines)}))`)}`;
+  const rInv = await fetch(invUrl, { headers: headers() });
+  if (!rInv.ok) return '';
+  const dataInv = await rInv.json();
+  const invRecs = dataInv.records || [];
+  if (!invRecs.length) return '';
+
+  // Gather all location IDs
+  const locIds = [];
+  invRecs.forEach(rec=>{
+    const ids = rec.fields['Location (Link to Locations)'] || [];
+    ids.forEach(id => { if (!locIds.includes(id)) locIds.push(id); });
+  });
+
+  // 2) If locations, fetch their details (Name, Rack, Row)
+  let locMap = {};
+  if (locIds.length){
+    for (let i=0; i<locIds.length; i+=50){
+      const chunk = locIds.slice(i,i+50);
+      const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
+      const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&fields[]=Name&fields[]=Rack&fields[]=Row&maxRecords=50`;
+      const r = await fetch(url, { headers: headers() });
+      const j = await r.json();
+      (j.records || []).forEach(rec => {
+        locMap[rec.id] = {
+          name: rec.fields?.Name || '',
+          rack: rec.fields?.Rack || '',
+          row:  rec.fields?.Row  || ''
+        };
+      });
+    }
+  }
+
+  // 3) Build HTML list
+  const rows = invRecs.map(r=>{
+    const qty = r.fields?.Quantity ?? 0;
+    const ids = r.fields['Location (Link to Locations)'] || [];
+    const parts = ids.map(id=>{
+      const L = locMap[id] || {};
+      const label = [L.name, L.rack ? `Rack ${L.rack}`:'', L.row ? `Row ${L.row}`:'']
+                    .filter(Boolean).join(' • ');
+      return label || id;
+    });
+    return `📍 ${parts.join(', ')} — Qty: ${qty}`;
+  });
+
+  return rows.length ? rows.map(chip).join('<br>') : '';
+}
+
 // ---------- ADD WINE ----------
 async function saveNewWine(){
-  if (!S.base || !S.token){ alert('Set Base ID and Token first.'); return; }
-  const modal = q('#add-modal');
+  if (!S.base || !S.token){ alert('Set Base ID and Token in Settings first.'); return; }
 
+  // Collect fields
   const name = q('#nw-name').value.trim();
-  if (!name){ alert('Name is required'); return; }
+  if (!name){ alert('Name is required.'); return; }
 
-  const payload = { fields: {} };
-  const setF = (field, val) => { if (val!=='' && val!=null) payload.fields[field] = val; };
+  const fields = {};
+  const setIf = (k, sel, coerce) => {
+    const el = q(sel);
+    if (!el) return;
+    const v = el.value.trim();
+    if (v === '') return;
+    fields[k] = coerce ? coerce(v) : v;
+  };
 
-  setF('Name', name);
-  setF('Producer', q('#nw-producer')?.value.trim());
-  const v = q('#nw-vintage')?.value.trim();
-  if (v) setF('Vintage', Number(v));
-  setF('Country', q('#nw-country')?.value.trim());
-  setF('Region', q('#nw-region')?.value.trim());
-  setF('Grape', q('#nw-grape')?.value.trim());
-  const price = q('#nw-price')?.value.trim();
-  if (price) setF('Price', Number(price));
-  const df = q('#nw-drink-from')?.value.trim();
-  if (df) setF('Drinkable from', Number(df));
-  const dt = q('#nw-drink-to')?.value.trim();
-  if (dt) setF('Drinkable to', Number(dt));
+  const toInt = v => {
+    const n = parseInt(v,10);
+    return isFinite(n) ? n : undefined;
+  };
+  const toFloat = v => {
+    const n = parseFloat(v);
+    return isFinite(n) ? n : undefined;
+  };
+
+  fields['Name'] = name;
+  setIf('Vintage', '#nw-vintage', toInt);
+  setIf('Producer', '#nw-producer');
+  setIf('Country', '#nw-country');
+  setIf('Region', '#nw-region');
+  setIf('Grape', '#nw-grape');
+  setIf('Price', '#nw-price', toFloat);
+  setIf('Drinkable from', '#nw-drink-from', toInt);
+  setIf('Drinkable to', '#nw-drink-to', toInt);
+
   const labelUrl = q('#nw-label-url')?.value.trim();
-  if (labelUrl) payload.fields['Label Image'] = [{ url: labelUrl }];
+  if (labelUrl){
+    fields['Label Image'] = [{ url: labelUrl }];
+  }
 
-  try{
-    // Create wine
-    const wRes = await fetch(
-      `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`,
-      { method:'POST', headers: headers(), body: JSON.stringify(payload) }
-    );
-    const wJson = await wRes.json();
-    if (!wRes.ok) throw new Error(wJson?.error?.message || `HTTP ${wRes.status}`);
+  // 1) Create wine
+  const createWineUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
+  const rWine = await fetch(createWineUrl, {
+    method:'POST',
+    headers: headers(),
+    body: JSON.stringify({ records: [{ fields }] })
+  });
 
-    const wineId = wJson.id;
+  if (!rWine.ok){
+    const t = await rWine.text();
+    alert(`Error saving wine: ${rWine.status}\n${t}`);
+    return;
+  }
+  const wineRes = await rWine.json();
+  const wineId = wineRes.records?.[0]?.id;
 
-    // Optional inventory row
-    const locStr = q('#nw-location')?.value.trim();
-    const qtyStr = q('#nw-qty')?.value.trim();
-    const qty = qtyStr ? Number(qtyStr) : 0;
+  // 2) Optional inventory row
+  const locText = q('#nw-location')?.value.trim();
+  const qtyVal  = q('#nw-qty')?.value.trim();
+  if (wineId && (locText || qtyVal)){
+    // Create or find the Location by Name (and Rack/Row parsed)
+    // Accept: "Rack 1 Row 5" or "Rack 1 – Row 5" or just "Rack 1"
+    let rack='', row='';
+    if (locText){
+      const mRack = locText.match(/rack\s*([^\s–]+)/i);
+      const mRow  = locText.match(/row\s*([^\s–]+)/i);
+      rack = mRack ? mRack[1] : '';
+      row  = mRow  ? mRow[1]  : '';
+    }
+    const locName = locText || 'Unnamed location';
 
-    if (locStr){
-      // Upsert Location by Name (simple): Name field store the free text; rack/row (optional) parsed from "Rack X Row Y"
-      const locLookupUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}`
-        + `?filterByFormula=${encodeURIComponent(`{Name}='${escAirtable(locStr)}'`)}&maxRecords=1`;
-      const lkRes = await fetch(locLookupUrl, { headers: headers() });
-      const lkJson = await lkRes.json();
-      let locId = lkJson.records?.[0]?.id;
+    // Try to find existing location by exact Name, Rack, Row
+    const findUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}`
+      + `?filterByFormula=${encodeURIComponent(
+        `AND({Name}='${escAirtable(locName)}'${rack?`,{Rack}='${escAirtable(rack)}'`:''}${row?`,{Row}='${escAirtable(row)}'`:''})`
+      )}&maxRecords=1`;
+    const rFind = await fetch(findUrl, { headers: headers() });
+    const jFind = await rFind.json();
+    let locId = jFind.records?.[0]?.id;
 
-      if (!locId){
-        // parse "Rack 1 Row 5"
-        let rack = '', row = '';
-        const mRack = locStr.match(/rack\s*([^\s]+)/i);
-        const mRow  = locStr.match(/row\s*([^\s]+)/i);
-        if (mRack) rack = mRack[1];
-        if (mRow)  row  = mRow[1];
-
-        const locPayload = { fields: { Name: locStr } };
-        if (rack) locPayload.fields['Rack'] = rack;
-        if (row)  locPayload.fields['Row']  = row;
-
-        const cRes = await fetch(
-          `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}`,
-          { method:'POST', headers: headers(), body: JSON.stringify(locPayload) }
-        );
-        const cJson = await cRes.json();
-        if (!cRes.ok) throw new Error(cJson?.error?.message || `HTTP ${cRes.status}`);
-        locId = cJson.id;
-      }
-
-      const invPayload = {
-        fields: {
-          'Wine (Link to Wines)': [wineId],
-          'Location (Link to Locations)': [locId],
-          'Quantity': qty
+    if (!locId){
+      // Create new Location
+      const rCreateLoc = await fetch(
+        `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}`,
+        {
+          method:'POST',
+          headers: headers(),
+          body: JSON.stringify({ records: [{ fields: { Name: locName, ...(rack?{Rack:rack}:{}) , ...(row?{Row:row}:{}) } }] })
         }
-      };
-      const iRes = await fetch(
-        `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}`,
-        { method:'POST', headers: headers(), body: JSON.stringify(invPayload) }
       );
-      const iJson = await iRes.json();
-      if (!iRes.ok) throw new Error(iJson?.error?.message || `HTTP ${iRes.status}`);
+      const jCL = await rCreateLoc.json();
+      locId = jCL.records?.[0]?.id;
     }
 
-    modal.classList.remove('open');
-    toast('Wine added.');
-    // optional: re-run search to reflect
-    // search();
-
-  }catch(err){
-    alert(`Error: ${err.message}`);
+    if (locId){
+      const qty = parseInt(qtyVal,10);
+      const invFields = {
+        'Wine (Link to Wines)': [wineId],
+        ...(locId ? { 'Location (Link to Locations)': [locId] } : {}),
+        ...(isFinite(qty) ? { Quantity: qty } : {})
+      };
+      const rInv = await fetch(
+        `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}`,
+        {
+          method:'POST',
+          headers: headers(),
+          body: JSON.stringify({ records: [{ fields: invFields }] })
+        }
+      );
+      if (!rInv.ok){
+        const t2 = await rInv.text();
+        alert(`Wine saved, but inventory failed: ${rInv.status}\n${t2}`);
+      }
+    }
   }
+
+  // Close modal & clear fields
+  q('#add-modal').style.display='none';
+  q('#add-modal').setAttribute('aria-hidden','true');
+  ['#nw-name','#nw-vintage','#nw-producer','#nw-country','#nw-region','#nw-grape',
+   '#nw-label-url','#nw-price','#nw-drink-from','#nw-drink-to','#nw-location','#nw-qty'
+  ].forEach(sel => { const el=q(sel); if(el) el.value=''; });
+
+  // Trigger search again to show the new record if relevant
+  search();
 }
