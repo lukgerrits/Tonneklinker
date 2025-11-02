@@ -104,10 +104,10 @@ function countryFlag(name){
   if(!name) return '🌍';
   const n = String(name).toLowerCase();
   const map = {
-    france:'🇫🇷', italy:'🇮🇹', spain:'🇪🇸', germany:'🇩🇪', portugal:'🇵🇹',
-    'united states':'🇺🇸','usa':'🇺🇸','u.s.a.':'🇺🇸', chile:'🇨🇱', argentina:'🇦🇷',
-    australia:'🇦🇺', 'new zealand':'🇳🇿', 'south africa':'🇿🇦', austria:'🇦🇹',
-    'united kingdom':'🇬🇧','uk':'🇬🇧', greece:'🇬🇷', switzerland:'🇨🇭'
+    frankrijk:'🇫🇷', italië:'🇮🇹', spanje:'🇪🇸', duitsland:'🇩🇪', portugal:'🇵🇹',
+    'verenigde staten':'🇺🇸', chili:'🇨🇱', argentinië:'🇦🇷',
+    australiië:'🇦🇺', 'nieuw zeeland':'🇳🇿', 'zuid afrika':'🇿🇦', oostenrijk:'🇦🇹',
+    greece:'🇬🇷'
   };
   return map[n] || '🌍';
 }
