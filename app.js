@@ -1,8 +1,6 @@
-// ---- Tonneklinker app.js v35 ----
+// ---- Tonneklinker app.js v36 ----
 
-/* ===============================
-   SETTINGS (localStorage-backed)
-   =============================== */
+// =========== SETTINGS ===========
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
   set base(v){ localStorage.setItem('tk_base', v); },
@@ -22,6 +20,26 @@ const headers = () => ({
   'Content-Type': 'application/json'
 });
 
+// =========== BOOT ===========
+document.addEventListener('DOMContentLoaded', () => {
+  const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
+  set('#airtableBase', S.base);
+  set('#airtableToken', S.token);
+  set('#winesTable', S.wines);
+  set('#inventoryTable', S.inv);
+  set('#locationsTable', S.loc);
+
+  q('#btn-save')?.addEventListener('click', saveSettings);
+  q('#btn-search')?.addEventListener('click', search);
+  q('#q')?.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+
+  q('#btn-open-add')?.addEventListener('click', openModal);
+  q('#btn-cancel-add')?.addEventListener('click', closeModal);
+  q('#btn-save-add')?.addEventListener('click', saveNewWine);
+
+  loadInventory();
+});
+
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -31,37 +49,7 @@ function saveSettings(){
   alert('Settings saved locally.');
 }
 
-/* ==============
-   BOOTSTRAP UI
-   ============== */
-document.addEventListener('DOMContentLoaded', () => {
-  // restore inputs
-  const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
-  set('#airtableBase', S.base);
-  set('#airtableToken', S.token);
-  set('#winesTable', S.wines);
-  set('#inventoryTable', S.inv);
-  set('#locationsTable', S.loc);
-
-  // handlers
-  q('#btn-save')?.addEventListener('click', saveSettings);
-  q('#btn-search')?.addEventListener('click', search);
-  q('#q')?.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
-
-  q('#btn-open-add')?.addEventListener('click', openModal);
-  q('#btn-cancel-add')?.addEventListener('click', closeModal);
-  q('#btn-save-add')?.addEventListener('click', saveNewWine);
-
-  // initial data
-  loadInventory();
-});
-
-/* ======================
-   SEARCH (strict AND)
-   ====================== */
-
-// Airtable wants double-quoted strings in formulas.
-// Also escape any embedded quotes.
+// =========== SEARCH (strict AND) ===========
 function escAirtableDbl(s){
   return String(s ?? '').replace(/"/g, '""');
 }
@@ -76,7 +64,6 @@ async function search(){
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
   if (!raw){ out.innerHTML = ''; return; }
 
-  // cancel any in-flight request
   try { _searchAbort?.abort(); } catch(_) {}
   _searchAbort = new AbortController();
 
@@ -84,12 +71,11 @@ async function search(){
   if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
 
   const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
-  const headersObj = { headers: headers(), signal: _searchAbort.signal };
+  const fetchOpts = { headers: headers(), signal: _searchAbort.signal };
 
-  // tokens split by spaces; AND across all
   const terms = raw.split(/\s+/).filter(Boolean);
 
-  // fields to search (concatenated text)
+  // CONCAT of searchable fields (stringy)
   const concat =
     "CONCATENATE(" +
       "{Name},' '," +
@@ -103,25 +89,36 @@ async function search(){
       "{Drinkable to}" +
     ")";
 
-  // server-side strict AND using DOUBLE-QUOTED strings
-  const pieces  = terms.map(t => `SEARCH("${escAirtableDbl(t)}", ${concat}) > 0`);
+  // CASE-INSENSITIVE server filter: FIND(x, LOWER(concat)) > 0  AND across tokens
+  const pieces  = terms.map(t => `FIND("${escAirtableDbl(t.toLowerCase())}", LOWER(${concat})) > 0`);
   const formula = pieces.length ? `AND(${pieces.join(',')})` : '1=1';
   const url     = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   try{
-    // 1) Fast server-side AND
-    const r = await fetch(url, headersObj);
+    // 1) Server AND
+    const r = await fetch(url, fetchOpts);
     const data = r.ok ? await r.json() : { records: [] };
-    if (Array.isArray(data.records) && data.records.length){
+    if ((data.records||[]).length){
       out.innerHTML = renderSearchCards(data.records);
       return;
     }
 
-    // 2) Client-side AND fallback (no OR)
-    const rAll = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
-    const all  = rAll.ok ? await rAll.json() : { records: [] };
+    // 2) Client AND fallback (still strict AND; fetch up to ~1000 via paging)
+    let all = [];
+    let next = null;
+    let guard = 0;
+    do{
+      const pageUrl = new URL(baseUrl);
+      pageUrl.searchParams.set('pageSize','100');
+      if (next) pageUrl.searchParams.set('offset', next);
+      const pr = await fetch(pageUrl.toString(), fetchOpts);
+      const pj = await pr.json();
+      all = all.concat(pj.records || []);
+      next = pj.offset;
+    }while(next && ++guard < 12); // up to ~1200 rows
+
     const needles = terms.map(s => s.toLowerCase());
-    const rows = (all.records||[]).filter(rec=>{
+    const rows = all.filter(rec=>{
       const f = rec.fields || {};
       const hay = [
         f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Taste,
@@ -135,27 +132,24 @@ async function search(){
   }catch(err){
     if (err.name !== 'AbortError'){
       console.error(err);
-      out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
+    out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
     }
   }finally{
     if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
 }
 
-/* =========================
-   RENDER SEARCH RESULT CARDS
-   ========================= */
+// =========== RENDERING ===========
 function renderSearchCards(records){
   const flagMap = {
-    Frankrijk: '🇫🇷', Italië: '🇮🇹', Oostenrijk: '🇦🇹', Spanje: '🇪🇸',
-    Duitsland: '🇩🇪', Portugal: '🇵🇹', VerenigdeStaten: '🇺🇸', Zwitserland: '🇨🇭',
-    België: '🇧🇪', Slovenië: '🇸🇮', Griekenland: '🇬🇷'
+    Frankrijk:'🇫🇷', Italië:'🇮🇹', Oostenrijk:'🇦🇹', Spanje:'🇪🇸',
+    Duitsland:'🇩🇪', Portugal:'🇵🇹', VerenigdeStaten:'🇺🇸', Zwitserland:'🇨🇭',
+    België:'🇧🇪', Slovenië:'🇸🇮', Griekenland:'🇬🇷'
   };
   const getText = v => {
     if (v == null) return '';
     if (typeof v === 'object'){
       if (Array.isArray(v)) return v.map(getText).join(', ');
-      // try common shapes from automations/AI fields, otherwise flatten
       if ('value' in v) return String(v.value);
       if ('text' in v)  return String(v.text);
       if ('content' in v) return String(v.content);
@@ -192,16 +186,15 @@ function renderSearchCards(records){
           <b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}
           <div class="meta">${chips}</div>
         </div>
-      </div>
-    `;
+      </div>`;
   }).join('');
 }
 
-/* =========================
-   INVENTORY (name mapping)
-   ========================= */
+// =========== INVENTORY ===========
 async function loadInventory(){
   if (!S.base || !S.token) return;
+  const target = q('#inventory');
+  if (target) target.innerHTML = '<p class="badge">Loading…</p>';
   try{
     const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=100`;
     const invRes = await fetch(invUrl, { headers: headers() });
@@ -212,7 +205,6 @@ async function loadInventory(){
       return;
     }
 
-    // collect linked IDs
     const wineIDs = new Set();
     const locIDs  = new Set();
     for (const r of invData.records){
@@ -225,7 +217,8 @@ async function loadInventory(){
       const map = {};
       for (let i = 0; i < arr.length; i += 50){
         const chunk = arr.slice(i, i + 50);
-        const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
+        // Use DOUBLE QUOTES inside Airtable formula
+        const formula = `OR(${chunk.map(id => `RECORD_ID()="${id}"`).join(',')})`;
         const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(tableName)}?filterByFormula=${encodeURIComponent(formula)}&fields[]=Name&maxRecords=50`;
         const res = await fetch(url, { headers: headers() });
         const json = await res.json();
@@ -244,7 +237,7 @@ async function loadInventory(){
       const wine = (f['Wine (Link to Wines)'] || []).map(id => wineMap[id] || id).join(', ');
       const loc  = (f['Location (Link to Locations)'] || []).map(id => locMap[id]  || id).join(', ');
       const qty  = f.Quantity ?? 0;
-      return `<div class="card"><b>${wine}</b><br/>📍 ${loc} — Qty: ${qty}</div>`;
+      return `<div class="card"><b>${wine || '(unknown wine)'}</b><br/>📍 ${loc || 'Unassigned'} — Qty: ${qty}</div>`;
     }).join('');
 
     q('#inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
@@ -253,9 +246,7 @@ async function loadInventory(){
   }
 }
 
-/* ================
-   ADD WINE MODAL
-   ================ */
+// =========== ADD WINE MODAL ===========
 function openModal(){ q('#add-modal')?.classList.add('open'); }
 function closeModal(){ q('#add-modal')?.classList.remove('open'); }
 
@@ -283,7 +274,6 @@ async function saveNewWine(){
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     alert('Wine added successfully!');
     closeModal();
-    // optional: refresh search/inventory views
     const qVal = q('#q')?.value?.trim();
     if (qVal) search(); else loadInventory();
   }catch(e){
