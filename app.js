@@ -144,7 +144,7 @@ function renderSearchCards(records){
 
     const chips=[
       countryRegion || null,
-      f.Grape ? `🍇 ${getText(f.Grape)}` : null,
+      grapeVal ? `🍇 ${getText(grapeVal)}` : null,
       f.Producer ? `🏷️ ${getText(f.Producer)}` : null,
       f.Taste ? `👅 ${getText(f.Taste)}` : null,
       f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
