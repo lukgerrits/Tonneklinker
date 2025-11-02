@@ -1,6 +1,6 @@
-// ---- Tonneklinker app.js (v25) ----
+// ---- Tonneklinker app.js (v30) ----
 
-// Persistent settings
+// =================== SETTINGS / STATE ===================
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
   set base(v){ localStorage.setItem('tk_base', v); },
@@ -17,7 +17,7 @@ const S = {
 const q = (sel) => document.querySelector(sel);
 const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
 
-// ---------- SETTINGS ----------
+// =================== SETTINGS PANEL ===================
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -50,17 +50,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (searchInput){
       searchInput.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
     }
+
+    // Add Wine modal handlers
+    const openBtn   = q('#btn-open-add');
+    const saveAdd   = q('#btn-save-add');
+    const cancelAdd = q('#btn-cancel-add');
+    if (openBtn)   openBtn.addEventListener('click', ()=> openAddModal(true));
+    if (cancelAdd) cancelAdd.addEventListener('click', ()=> openAddModal(false));
+    if (saveAdd)   saveAdd.addEventListener('click', submitNewWine);
+
     _handlersBound = true;
   }
 
   loadInventory();
 });
 
-// ---------- SEARCH ----------
+// =================== SEARCH ===================
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
-function norm(s){
-  return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
-}
+function norm(s){ return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
 
 let _searchAbort;
 
@@ -135,7 +142,8 @@ async function search(){
     if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
   }
 }
-// ---------- RENDER ----------
+
+// =================== RENDER RESULTS ===================
 function renderSearchCards(records){
   const getText = (val) => {
     if (val == null) return '';
@@ -195,7 +203,7 @@ function renderSearchCards(records){
   return html || '<p class="badge">No matches.</p>';
 }
 
-// ---------- INVENTORY ----------
+// =================== INVENTORY LIST ===================
 async function loadInventory(){
   if (!S.base || !S.token) return;
   try{
@@ -245,5 +253,118 @@ async function loadInventory(){
     q('#inventory').innerHTML = out || '<p class="badge">No inventory yet.</p>';
   }catch(err){
     q('#inventory').innerHTML = `<p class="badge">Inventory error: ${err.message}</p>`;
+  }
+}
+
+// =================== ADD WINE MODAL: HELPERS ===================
+function openAddModal(open=true){
+  const m = q('#add-modal');
+  if (!m) return;
+  if (open){ m.classList.add('open'); m.setAttribute('aria-hidden','false'); }
+  else { m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
+}
+
+function readVal(id){ const el=q(id); return el ? el.value.trim() : ''; }
+function toNum(s){ const n = Number(String(s||'').replace(',','.')); return isFinite(n) ? n : undefined; }
+function toInt(s){ const n = parseInt(s,10); return isFinite(n) ? n : undefined; }
+
+async function atCreate(table, fields){
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(table)}`;
+  const r = await fetch(url, {
+    method:'POST',
+    headers: headers(),
+    body: JSON.stringify({ records:[{ fields }] })
+  });
+  const json = await r.json();
+  if (!r.ok) throw new Error(json?.error?.message || r.statusText);
+  return json.records?.[0];
+}
+
+async function atFindByName(table, name){
+  const formula = `LOWER({Name})=LOWER('${escAirtable(name)}')`;
+  const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(table)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=1&fields[]=Name`;
+  const r = await fetch(url, { headers: headers() });
+  const j = await r.json();
+  return j.records?.[0]?.id || null;
+}
+
+async function findOrCreateLocation(name){
+  if (!name) return null;
+  const existing = await atFindByName(S.loc, name);
+  if (existing) return existing;
+  const rec = await atCreate(S.loc, { Name: name });
+  return rec.id;
+}
+
+// =================== ADD WINE: SUBMIT ===================
+async function submitNewWine(){
+  if (!S.base || !S.token){ alert('Set Base ID and Token in Settings first.'); return; }
+
+  const name   = readVal('#nw-name');
+  if (!name){ alert('Name is required.'); return; }
+
+  // Optional inputs
+  const vintage = toInt(readVal('#nw-vintage'));
+  const country = readVal('#nw-country');
+  const region  = readVal('#nw-region');
+  const grape   = readVal('#nw-grape');
+  const imgUrl  = readVal('#nw-label-url');
+
+  const drinkFrom = readVal('#nw-drink-from');
+  const drinkTo   = readVal('#nw-drink-to');
+  const price     = toNum(readVal('#nw-price'));
+
+  const locName = readVal('#nw-location');
+  const qty     = toInt(readVal('#nw-qty'));
+
+  // Wine fields (Taste & Food Pairing generated automatically by Airtable AI)
+  const wineFields = {
+    Name: name,
+    ...(vintage!=null ? { Vintage: vintage } : {}),
+    ...(country ? { Country: country } : {}),
+    ...(region  ? { Region: region } : {}),
+    ...(grape   ? { Grape: grape } : {}),
+    ...(drinkFrom ? { 'Drinkable from': drinkFrom } : {}),
+    ...(drinkTo   ? { 'Drinkable to':   drinkTo   } : {}),
+    ...(price!=null ? { Price: price } : {}),
+    ...(imgUrl ? { 'Label Image': [{ url: imgUrl }] } : {})
+  };
+
+  const saveBtn = q('#btn-save-add');
+  const originalText = saveBtn?.textContent;
+  if (saveBtn){ saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+  try{
+    // 1) Create wine
+    const wineRec = await atCreate(S.wines, wineFields);
+
+    // 2) Optional: create inventory line
+    if (qty!=null || locName){
+      const locId = await findOrCreateLocation(locName || 'Unassigned');
+      const invFields = {
+        'Wine (Link to Wines)': [ wineRec.id ],
+        ...(locId ? { 'Location (Link to Locations)': [ locId ] } : {}),
+        ...(qty!=null ? { Quantity: qty } : {})
+      };
+      await atCreate(S.inv, invFields);
+    }
+
+    // Cleanup + refresh
+    openAddModal(false);
+    ['#nw-name','#nw-vintage','#nw-country','#nw-region','#nw-grape',
+     '#nw-label-url','#nw-drink-from','#nw-drink-to','#nw-price',
+     '#nw-location','#nw-qty'
+    ].forEach(id => { const el=q(id); if(el) el.value=''; });
+
+    loadInventory();
+    const searchInput = q('#q'); if (searchInput){ searchInput.value = name; }
+    if (typeof search === 'function') search();
+
+    alert('Wine added. Taste & Food Pairing will appear shortly (Airtable AI).');
+  }catch(err){
+    console.error(err);
+    alert('Error adding wine: ' + err.message);
+  }finally{
+    if (saveBtn){ saveBtn.disabled = false; saveBtn.textContent = originalText || 'Save'; }
   }
 }
