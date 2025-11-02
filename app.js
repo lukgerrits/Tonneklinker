@@ -140,13 +140,13 @@ function renderSearchCards(records){
     const grapeTxt   = getText(f.Grape);
     const chips = [
       countryTxt ? `${countryFlag(countryTxt)} ${countryTxt}` : null,
+      (f.Region || null),
       grapeTxt ? `${grapeIcon()} ${grapeTxt}` : null,
       getText(f.Taste) || null,
       f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
       (f['Drinkable from'] || f['Drinkable to'])
         ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
-      (f.Region || null),
       (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
     ]
     .filter(Boolean)
