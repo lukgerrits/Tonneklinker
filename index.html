@@ -1,123 +1,121 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tonneklinker · Cellar</title>
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="./icon-192.png" />
-  <meta name="theme-color" content="#5A082E" />
-  <link rel="stylesheet" href="./styles.css" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Tonneklinker</title>
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <meta name="theme-color" content="#5A0E2E"/>
+  <link rel="stylesheet" href="./styles.css">
+
+  <style>
+    /* ===== Rack Visual (Rack + Row only) ===== */
+    .rack-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    .rack-tab { padding:6px 10px; border-radius:10px; background:#1e1e1e; color:#bbb; cursor:pointer; }
+    .rack-tab.active { background:#2a2a2a; color:#fff; }
+
+    .rack-grid-vertical { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+    .rack-row {
+      width:100%; max-width:360px;
+      display:flex; align-items:center; gap:8px;
+      background:#111; border:1px solid #333; border-radius:8px;
+      padding:8px 10px; color:#aaa; cursor:pointer;
+    }
+    .rack-row.has { background:#182018; color:#bdf0bd; border-color:#294; }
+    .rack-row .row-label { width:48px; font-weight:700; text-align:center; color:#888; }
+    .rack-row .qty { margin-left:auto; font-size:.9rem; color:#fff; }
+
+    /* ===== Add Wine Modal ===== */
+    .modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .modal.open { display: flex; }
+    .modal .card {
+      background: #111; border: 1px solid #333; border-radius: 16px;
+      padding: 20px; max-width: 720px; width: 92%; color: #f5f5f5;
+      box-shadow: 0 0 20px rgba(0,0,0,0.4);
+    }
+    .grid2, .grid3 { display:grid; gap:10px; }
+    .grid2 { grid-template-columns:1fr 1fr; }
+    .grid3 { grid-template-columns:1fr 1fr 1fr; }
+    .modal input {
+      width:100%; background:#1b1b1b; border:1px solid #333; border-radius:8px;
+      padding:10px; color:#eee;
+    }
+    .modal input::placeholder{ color:#777; }
+    .actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+    .btn { background: linear-gradient(90deg,#6b1437,#0f6a68); border:0; color:#fff; padding:10px 16px; border-radius:12px; cursor:pointer; }
+    .btn:hover{ opacity:.85 }
+    .btn-secondary{ background:#2a2a2a; color:#ddd; }
+    .badge{ background:#222; border-radius:8px; padding:4px 8px; font-size:.85rem; color:#aaa; }
+
+    /* ===== Location tooltip for wine cards ===== */
+    .loc-pill{ cursor:pointer; }
+    .loc-pop{
+      position:absolute; z-index:20; top:100%; left:0; margin-top:6px;
+      background:#0f0f0f; border:1px solid #333; border-radius:10px; padding:8px 10px;
+      box-shadow:0 6px 18px rgba(0,0,0,.35); color:#eaeaea; white-space:nowrap; display:none;
+    }
+    .loc-pop.show{ display:block; }
+    .loc-pop small{ color:#9aa; }
+  </style>
 </head>
+
 <body>
-  <!-- ===== Tonneklinker Header + Add Wine Modal ===== -->
+  <!-- Header -->
   <header style="display:flex;align-items:center;gap:12px;padding:8px 12px;">
-    <img class="logo" src="icon-192.png?v=36" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px"/>
-    <h1 style="margin-right:auto;font-size:1.4rem;">Tonneklinker · Cellar</h1>
+    <img class="logo" src="icon-192.png?v=40" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px"/>
+    <h1 style="margin-right:auto">Tonneklinker · Cellar</h1>
     <button id="btn-open-add" class="btn">+ Add Wine</button>
     <nav style="margin-left:8px"><a href="./mobile.html" class="badge">Mobile</a></nav>
   </header>
 
   <main class="container">
+    <!-- Search -->
     <section class="card">
       <h2>Search Wines</h2>
       <div class="grid cols-2">
-        <input id="q" placeholder="Search by name, producer, grape, vintage…" />
-        <button id="btn-search" class="btn">Search</button>
+        <input id="q" placeholder="Search by name, producer, grape, vintage…"/>
+        <button id="btn-search">Search</button>
       </div>
-      <div id="results" style="margin-top:12px;"></div>
+      <div id="results" style="margin-top:12px"></div>
     </section>
 
+    <!-- Cellar Map -->
+    <section class="card">
+      <h2>Cellar Map</h2>
+      <div id="rack-tabs" class="rack-tabs"></div>
+      <div id="rack-grid" class="rack-grid-wrap"></div>
+      <p id="rack-hint" class="badge">Tap a row to see wines. Green = has bottles.</p>
+    </section>
+
+    <!-- Inventory -->
     <section class="card">
       <h2>Inventory</h2>
-      <div id="inventory"><p class="badge">Loading...</p></div>
+      <div id="inventory"></div>
     </section>
 
+    <!-- Settings -->
     <section class="card">
       <h2>Settings</h2>
       <div class="grid cols-2">
-        <input id="airtableBase" placeholder="Airtable Base ID" />
-        <input id="airtableToken" placeholder="Airtable Personal Access Token" />
-        <input id="winesTable" value="Wines" placeholder="Wines Table" />
-        <input id="inventoryTable" value="Inventory" placeholder="Inventory Table" />
-        <input id="locationsTable" value="Locations" placeholder="Locations Table" />
-        <button id="btn-save" class="btn">Save</button>
+        <input id="airtableBase" placeholder="Airtable Base ID"/>
+        <input id="airtableToken" placeholder="Airtable Personal Access Token"/>
+        <input id="winesTable" value="Wines" placeholder="Wines table"/>
+        <input id="inventoryTable" value="Inventory" placeholder="Inventory table"/>
+        <input id="locationsTable" value="Locations" placeholder="Locations table"/>
+        <button id="btn-save">Save</button>
       </div>
-      <p class="badge" style="margin-top:12px;">Your token is stored locally on this device only.</p>
+      <p class="badge">Your token is stored locally on this device only.</p>
     </section>
   </main>
 
-  <footer style="text-align:center;margin:30px 0;">
-    © Tonneklinker
-  </footer>
+  <footer>© Tonneklinker</footer>
 
-  <!-- ===== Add Wine Modal ===== -->
-  <style>
-    .modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.7);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    .modal.open { display: flex; }
-    .modal .card {
-      background: #111;
-      border: 1px solid #333;
-      border-radius: 16px;
-      padding: 20px;
-      max-width: 720px;
-      width: 92%;
-      color: #f5f5f5;
-      box-shadow: 0 0 20px rgba(0,0,0,0.4);
-    }
-    .modal h3 { margin-top: 0; color: #fff; }
-    .grid2, .grid3 {
-      display: grid;
-      gap: 10px;
-    }
-    .grid2 { grid-template-columns: 1fr 1fr; }
-    .grid3 { grid-template-columns: 1fr 1fr 1fr; }
-    .modal input {
-      width: 100%;
-      background: #1b1b1b;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 10px;
-      color: #eee;
-    }
-    .modal input::placeholder { color: #777; }
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      margin-top: 16px;
-    }
-    .btn {
-      background: linear-gradient(90deg,#6b1437,#0f6a68);
-      border: none;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 12px;
-      cursor: pointer;
-      transition: opacity 0.2s ease-in-out;
-    }
-    .btn:hover { opacity: 0.85; }
-    .btn-secondary {
-      background: #2a2a2a;
-      color: #ddd;
-    }
-    .badge {
-      background: #222;
-      border-radius: 8px;
-      padding: 4px 8px;
-      font-size: 0.85rem;
-      color: #aaa;
-    }
-  </style>
-
+  <!-- Add Wine Modal -->
   <div id="add-modal" class="modal" aria-hidden="true">
     <div class="card">
       <h3>+ Add Wine</h3>
@@ -134,21 +132,26 @@
         <input id="nw-drink-to" placeholder="Drinkable to (e.g. 2030)" />
         <input id="nw-price" placeholder="Price (e.g. 39.95)" />
       </div>
+
       <h4 style="margin:16px 0 8px;">Inventory (optional)</h4>
       <div class="grid2">
-        <input id="nw-location" placeholder="Location / Rack (e.g. Rack 1)" />
+        <input id="nw-location" placeholder="Location / Rack (e.g. Rack 1 Row 5)" />
         <input id="nw-qty" placeholder="Quantity (e.g. 3)" />
       </div>
+
       <div class="actions">
         <button id="btn-cancel-add" class="btn btn-secondary">Cancel</button>
         <button id="btn-save-add" class="btn">Save</button>
       </div>
+
       <p class="badge" style="margin-top:12px;text-align:center;">
         Taste & Food Pairing will be generated automatically by Airtable AI (in Dutch).
       </p>
     </div>
   </div>
 
-  <script src="./app.js?v=36"></script>
+  <!-- App -->
+  <script src="./app.js?v=40"></script>
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./service-worker.js');}</script>
 </body>
 </html>
