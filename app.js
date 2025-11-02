@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (v42) ----
+// ---- Tonneklinker app.js (v43) ----
 
 // Persistent settings
 const S = {
