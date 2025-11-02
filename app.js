@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (full, working) ----
+// ---- Tonneklinker app.js (full) ----
 
 // Local settings (persisted in localStorage)
 const S = {
@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInventory();
 });
 
-// ---------- SEARCH (hybrid: server first, fallback client-side) ----------
+// ---------- SEARCH (multi-term AND; server first, client fallback) ----------
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
 function norm(s){
   return String(s||'')
@@ -54,18 +54,22 @@ function norm(s){
 
 async function search(){
   const termEl = q('#q');
-  const termRaw = (termEl ? termEl.value : '').trim();
+  const raw = (termEl ? termEl.value : '').trim();
   const out = q('#results');
   if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
-  if (!termRaw){ out.innerHTML = ''; return; }
+  if (!raw){ out.innerHTML = ''; return; }
 
-  const term = escAirtable(termRaw);
   const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
   const headersObj = { headers: headers() };
 
-  // 1) Server-side formula (fast, but Airtable can be picky with blanks/accents)
-  const within = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing})";
-  const formula = `SEARCH('${term}', ${within})`;
+  // Split into terms (AND logic, natural language)
+  const terms = raw.split(/\s+/).filter(Boolean);
+  console.log('Search terms:', terms);
+
+  // --- 1) Server-side attempt: AND(SEARCH('t1', CONCAT...), SEARCH('t2', CONCAT...), ...)
+  const concatFields = "CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})";
+  const formulaParts = terms.map(t => `SEARCH('${escAirtable(t)}', ${concatFields})`);
+  const formula = formulaParts.length === 1 ? formulaParts[0] : `AND(${formulaParts.join(',')})`;
   const serverUrl = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
   console.log('SERVER SEARCH →', serverUrl);
 
@@ -80,19 +84,18 @@ async function search(){
     console.warn('Server search failed — falling back to client-side search:', e);
   }
 
-  // 2) Client-side fallback (accent-insensitive)
+  // --- 2) Client-side fallback: accent-insensitive AND across fields
   try{
-    const fallbackUrl = `${baseUrl}?maxRecords=200`;
-    console.log('CLIENT SEARCH →', fallbackUrl);
-    const r2 = await fetch(fallbackUrl, headersObj);
+    const r2 = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
     const data2 = await r2.json();
-    const needle = norm(termRaw);
+    const needles = terms.map(norm);
     const rows = (data2.records||[]).filter(rec=>{
-      const f = rec.fields||{};
+      const f = rec.fields || {};
       const hay = norm([
-        f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Taste, f['Food Pairing']
+        f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Taste,
+        f['Food Pairing'], f['Drinkable from'], f['Drinkable to']
       ].filter(Boolean).join(' '));
-      return hay.includes(needle);
+      return needles.every(t => hay.includes(t)); // all words must match
     });
     out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
   }catch(err){
@@ -100,20 +103,34 @@ async function search(){
   }
 }
 
-// Renders rich wine cards (label image + all meta chips)
+// ---------- RENDER (no [object Object], safe arrays/attachments) ----------
 function renderSearchCards(records){
+  const getText = (val) => {
+    if (val == null) return '';
+    if (Array.isArray(val)){
+      return val.map(v => (typeof v === 'string') ? v : (v.name || v.url || '')).filter(Boolean).join(', ');
+    }
+    if (typeof val === 'object'){
+      return val.name || val.url || '';
+    }
+    return String(val);
+  };
+
   const html = records.map(rec => {
     const f = rec.fields || {};
-    const img = (f['Label Image'] && f['Label Image'][0]?.url)
-      ? `<img src="${f['Label Image'][0].url}" class="label-img" alt="Label"/>` : '';
+
+    const imgUrl = Array.isArray(f['Label Image'])
+      ? f['Label Image'][0]?.url
+      : (f['Label Image']?.url || '');
+    const img = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
 
     const chips = [
-      [f.Region, f.Country].filter(Boolean).join(' • ') || null,
-      f.Grape || null,
-      f.Taste || null,
-      f['Food Pairing'] ? `🍽️ ${f['Food Pairing']}` : null,
+      [getText(f.Region), getText(f.Country)].filter(Boolean).join(' • ') || null,
+      getText(f.Grape) || null,
+      getText(f.Taste) || null,
+      f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
       (f['Drinkable from'] || f['Drinkable to'])
-        ? `🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}`
+        ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
       (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null
     ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
@@ -122,7 +139,7 @@ function renderSearchCards(records){
       <div class="card wine-card">
         ${img}
         <div class="wine-info">
-          <b>${f.Name || ''}</b>${f.Vintage ? ` — ${f.Vintage}` : ''}
+          <b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}
           <div class="meta">${chips}</div>
         </div>
       </div>`;
