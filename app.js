@@ -114,19 +114,20 @@ function countryFlag(name){
 function grapeIcon(){ return '🍇'; }
 function renderSearchCards(records){
   const getText = (val) => {
-    if (val == null) return '';
-    if (Array.isArray(val)){
-      return val.map(v => {
-        if (typeof v === 'string') return v;
-        if (typeof v === 'object') return v.name || v.text || v.content || v.url || '';
-        return String(v);
-      }).filter(Boolean).join(', ');
-    }
-    if (typeof val === 'object'){
-      return val.name || val.text || val.content || val.url || '';
-    }
-    return String(val);
-  };
+  if (val == null) return '';
+  if (typeof val === 'object') {
+    // Handle Airtable AI field format and generic objects
+    if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
+    if (val.value) return val.value;      // for AI “Taste” fields
+    if (val.text) return val.text;
+    if (val.content) return val.content;
+    if (val.name) return val.name;
+    if (val.url) return val.url;
+    return Object.values(val).join(', ');
+  }
+  if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
+  return String(val);
+};
 
   const html = records.map(rec => {
     const f = rec.fields || {};
