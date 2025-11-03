@@ -1,345 +1,365 @@
-// ---- Tonneklinker app.js (v59) ----
+// ---- Tonneklinker app v60 ----
 
-// ---------- Settings helpers ----------
+// Auto-detect base URL (no hardcoding needed)
+(function(){ const link = document.querySelector('link[rel="stylesheet"]');
+  if(link && !link.href.includes('v=')) link.href += (link.href.includes('?')?'&':'?')+'v=60';
+})();
+
+// Local settings
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
+  set base(v){ localStorage.setItem('tk_base', v); },
   get token(){ return localStorage.getItem('tk_token') || ''; },
+  set token(v){ localStorage.setItem('tk_token', v); },
   get wines(){ return localStorage.getItem('tk_wines') || 'Wines'; },
+  set wines(v){ localStorage.setItem('tk_wines', v); },
   get inv(){ return localStorage.getItem('tk_inv') || 'Inventory'; },
-  get loc(){ return localStorage.getItem('tk_loc') || 'Locations'; }
+  set inv(v){ localStorage.setItem('tk_inv', v); },
+  get loc(){ return localStorage.getItem('tk_loc') || 'Locations'; },
+  set loc(v){ localStorage.setItem('tk_loc', v); }
 };
 
-const q  = s => document.querySelector(s);
-const qa = s => Array.from(document.querySelectorAll(s));
-const headers = () => ({ 'Authorization': 'Bearer '+S.token, 'Content-Type':'application/json' });
+const q = sel => document.querySelector(sel);
+const byId = id => document.getElementById(id);
+const H = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
 
-// ---------- Utils ----------
-const escAirtable = s => String(s||'').replace(/'/g,"''");
-const norm = s => String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+// Load UI settings
+document.addEventListener('DOMContentLoaded', () => {
+  const set = (id,val)=>{ const el=byId(id); if(el) el.value=val; };
+  set('airtableBase', S.base);
+  set('airtableToken', S.token);
+  set('winesTable', S.wines);
+  set('inventoryTable', S.inv);
+  set('locationsTable', S.loc);
 
-// Flags (extend if you like)
-const FLAGS = {
-  Frankrijk:'🇫🇷', Italië:'🇮🇹', Oostenrijk:'🇦🇹', Spanje:'🇪🇸', Duitsland:'🇩🇪',
-  Portugal:'🇵🇹', Zwitserland:'🇨🇭', België:'🇧🇪', Slovenië:'🇸🇮', Griekenland:'🇬🇷'
-};
-
-// ---------- Global cache built from Inventory/Locations ----------
-/** Map wineId -> [{rack,row,col,qty,name}] */
-const INV_BY_WINE = new Map();
-/** Set of cell ids: `cell-r{rack}-r{row}-c{col}` that have any wine */
-const CELL_HAS = new Set();
-/** Map cellId -> array of { name, qty } for popup on cell click */
-const CELL_LIST = new Map();
-
-// ---------- Build cellar grid (3 racks, 6x6) ----------
-function buildCellarGrid(){
-  const wrap = q('#cellar-map');
-  if (!wrap) return;
-
-  wrap.innerHTML = `
-    <div class="cellar-note">Green cells have bottles. Click a cell to see wines there. Hover/click a “📍 cellar” result to highlight a cell.</div>
-  `;
-
-  for (let rack=1; rack<=3; rack++){
-    const rackEl = document.createElement('div');
-    rackEl.className = 'rack';
-    rackEl.innerHTML = `<div class="rack-title">Rack ${rack}</div><div class="rack-grid"></div>`;
-    const grid = rackEl.querySelector('.rack-grid');
-
-    for (let row=1; row<=6; row++){
-      for (let col=1; col<=6; col++){
-        const id = `cell-r${rack}-r${row}-c${col}`;
-        const cell = document.createElement('div');
-        cell.id = id;
-        cell.className = 'cell' + (CELL_HAS.has(id) ? ' has' : '');
-        cell.textContent = `${row}-${col}`;
-
-        // click → show wines in this cell
-        cell.addEventListener('click', ()=>{
-          const list = CELL_LIST.get(id) || [];
-          const msg = list.length
-            ? list.map(x=>`• ${x.name} — Qty: ${x.qty}`).join('\n')
-            : '(Empty)';
-          alert(`Rack ${rack} · Row ${row} · Column ${col}\n\n${msg}`);
-        });
-
-        grid.appendChild(cell);
-      }
-    }
-
-    wrap.appendChild(rackEl);
-  }
-}
-
-// ---------- Highlight helper (used by tooltip hover/click) ----------
-function highlightCell(rack, row, col, {scroll=false, flash=false} = {}){
-  const id = `cell-r${rack}-r${row}-c${col}`;
-  const el = document.getElementById(id);
-  if (!el) return;
-
-  el.classList.add('highlight');
-  if (scroll) el.scrollIntoView({behavior:'smooth', block:'center'});
-  if (flash){
-    el.classList.add('pulse');
-    setTimeout(()=> el.classList.remove('pulse'), 1200);
-  }
-}
-
-// ---------- Load Inventory + Locations to fill maps ----------
-async function loadInventory(){
-  if (!S.base || !S.token) return;
-
-  // 1) Get inventory rows (Wine link, Location link, Quantity)
-  const invURL = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=200&fields[]=Wine%20(Link%20to%20Wines)&fields[]=Location%20(Link%20to%20Locations)&fields[]=Quantity`;
-  const invRes = await fetch(invURL, {headers:headers()});
-  const inv = await invRes.json();
-
-  const locIds = new Set();
-  const pairs = []; // temp store
-
-  (inv.records||[]).forEach(r=>{
-    const wineIds = r.fields?.['Wine (Link to Wines)'] || [];
-    const locId   = (r.fields?.['Location (Link to Locations)'] || [])[0];
-    const qty     = r.fields?.Quantity ?? 0;
-    if (!wineIds.length || !locId || !qty) return;
-
-    locIds.add(locId);
-    wineIds.forEach(wid => pairs.push({ wineId: wid, locId, qty }));
+  byId('btn-save').addEventListener('click', () => {
+    S.base = byId('airtableBase').value.trim();
+    S.token = byId('airtableToken').value.trim();
+    S.wines = byId('winesTable').value.trim() || 'Wines';
+    S.inv   = byId('inventoryTable').value.trim() || 'Inventory';
+    S.loc   = byId('locationsTable').value.trim() || 'Locations';
+    const ok = byId('save-ok');
+    if(ok){ ok.style.display='inline-flex'; setTimeout(()=>ok.style.display='none', 1200); }
+    // reload cellar map with new settings
+    buildCellarMap();
   });
 
-  // 2) Locations
-  const chunks = [...locIds];
-  const locMap = {};
-  for (let i=0; i<chunks.length; i+=50){
-    const batch = chunks.slice(i,i+50);
-    const formula = `OR(${batch.map(id=>`RECORD_ID()='${id}'`).join(',')})`;
-    const locURL = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&fields[]=Name&fields[]=Rack&fields[]=Row&fields[]=Column&maxRecords=50`;
-    const r = await fetch(locURL, {headers:headers()});
-    const j = await r.json();
-    (j.records||[]).forEach(x=>{
-      locMap[x.id] = {
-        rack:Number(x.fields?.Rack||1),
-        row :Number(x.fields?.Row||1),
-        col :Number(x.fields?.Column||1),
-        name:x.fields?.Name||''
-      };
-    });
-  }
+  byId('btn-search').addEventListener('click', search);
+  byId('q').addEventListener('keydown', e => { if(e.key==='Enter') search(); });
 
-  // 3) Build maps
-  INV_BY_WINE.clear();
-  CELL_HAS.clear();
-  CELL_LIST.clear();
+  // Initial map
+  buildCellarMap();
+});
 
-  pairs.forEach(p=>{
-    const L = locMap[p.locId];
-    if (!L) return;
+// ---- Utilities ----
+function escAT(s){ return String(s||'').replace(/'/g,"''"); }
+function norm(s){ return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
+function baseURL(table){ return `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(table)}`; }
 
-    // by wine
-    const list = INV_BY_WINE.get(p.wineId) || [];
-    list.push({ rack:L.rack, row:L.row, col:L.col, qty:p.qty });
-    INV_BY_WINE.set(p.wineId, list);
-
-    // by cell
-    const cellId = `cell-r${L.rack}-r${L.row}-c${L.col}`;
-    CELL_HAS.add(cellId);
-    const list2 = CELL_LIST.get(cellId) || [];
-    list2.push({ name:'(unknown wine id)', qty:p.qty, wineId:p.wineId });
-    CELL_LIST.set(cellId, list2);
-  });
-
-  // We'll fill real names when search results load (so we can show the proper wine names in cell popups).
-}
-
-// ---------- Search ----------
+// ---- Search ----
 let _abort;
 async function search(){
-  const out = q('#results');
-  const termEl = q('#q');
-  const raw = (termEl?.value || '').trim();
-  if (!out) return;
-  if (!S.base || !S.token){ out.innerHTML = `<p class="badge">Set Base/Token in Settings.</p>`; return; }
-  if (!raw){ out.innerHTML = ''; return; }
+  const term = (byId('q').value||'').trim();
+  const out = byId('results');
+  if(!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
+  if(!term){ out.innerHTML=''; return; }
 
-  try{ _abort?.abort(); }catch(_) {}
-  _abort = new AbortController();
+  try{ _abort?.abort(); }catch{} _abort = new AbortController();
 
-  const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
-  const concat =
-    "CONCATENATE({Name},' ',{Vintage},' ',{Producer},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})";
-  const terms = raw.split(/\s+/).filter(Boolean);
-  const pieces = terms.map(t => `SEARCH('${escAirtable(t)}', ${concat}) > 0`);
-  const formula = pieces.length ? `AND(${pieces.join(',')})` : '1=1';
-  const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+  // AND-only, server first
+  const fields = ["Name","Vintage","Country","Region","Producer","Grape","Taste","Food Pairing","Drinkable from","Drinkable to","Price (€)","Label Image"];
+  const within = `CONCATENATE({Name},' ',{Vintage},' ',{Country},' ',{Region},' ',{Producer},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})`;
+  const pieces = term.split(/\s+/).filter(Boolean).map(t => `SEARCH('${escAT(t)}', ${within})>0`);
+  const formula = pieces.length? `AND(${pieces.join(',')})` : '1=1';
+  const url = `${baseURL(S.wines)}?${fields.map(f=>`fields[]=${encodeURIComponent(f)}`).join('&')}&filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
-  // 1) AND-only server search
-  const r = await fetch(url, { headers:headers(), signal:_abort.signal });
-  const data = await r.json();
-  if (Array.isArray(data.records) && data.records.length){
+  let data;
+  try{
+    const r = await fetch(url, { headers:H(), signal:_abort.signal });
+    data = await r.json();
+    if(!Array.isArray(data.records) || data.records.length===0) throw new Error('fallback');
     out.innerHTML = renderSearchCards(data.records);
-    afterRenderWines(data.records);  // build cellar chips + replace cell wine names
-    return;
+  }catch{
+    // client fallback (accent-insensitive AND)
+    const r2 = await fetch(`${baseURL(S.wines)}?maxRecords=200`, { headers:H(), signal:_abort.signal });
+    const d2 = await r2.json();
+    const needle = term.split(/\s+/).map(norm);
+    const rows = (d2.records||[]).filter(rec=>{
+      const f = rec.fields||{};
+      const hay = norm([f.Name,f.Vintage,f.Country,f.Region,f.Producer,f.Grape,f.Taste,f['Food Pairing'],f['Drinkable from'],f['Drinkable to']].filter(Boolean).join(' '));
+      return needle.every(t => hay.includes(t));
+    });
+    out.innerHTML = rows.length? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
   }
-
-  // 2) Fallback client AND (accent-insensitive)
-  const allR = await fetch(`${baseUrl}?maxRecords=200`, { headers:headers(), signal:_abort.signal });
-  const all = await allR.json();
-  const needle = terms.map(norm);
-  const rows = (all.records||[]).filter(rec=>{
-    const f = rec.fields||{};
-    const hay = norm([
-      f.Name,f.Vintage,f.Producer,f.Country,f.Region,f.Grape,f.Taste,f['Food Pairing'],
-      f['Drinkable from'],f['Drinkable to']
-    ].filter(Boolean).join(' '));
-    return needle.every(t => hay.includes(t));
-  });
-  out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
-  if (rows.length) afterRenderWines(rows);
 }
 
-// ---------- Render wines ----------
-function renderSearchCards(records){
-  return records.map(rec=>{
-    const f = rec.fields || {};
-    const img = (f['Label Image'] && f['Label Image'][0]?.url)
-      ? `<img class="label-img" src="${f['Label Image'][0].url}" alt="Label" />` : '';
+function chip(text, cls=''){ return text?`<span class="badge ${cls}">${text}</span>`:''; }
+function fmtWindow(a,b){ if(!a && !b) return ''; if(a&&b) return `${a} – ${b}`; return a? `from ${a}`:`until ${b}`; }
+function fmtPrice(p){ if(p==null||p==='') return ''; const n=Number(String(p).replace(',','.')); return isFinite(n)? `€ ${n.toFixed(2)}`: String(p); }
 
-    const flag = FLAGS[f.Country] || '🏳️';
-    const countryRegion = [flag+' '+(f.Country||''), f.Region||''].filter(Boolean).join(' – ');
+function renderSearchCards(records){
+  const out = records.map(rec=>{
+    const f = rec.fields||{};
+    const labelUrl = Array.isArray(f['Label Image']) ? f['Label Image'][0]?.url : (f['Label Image']?.url||'');
+    const labelImg = labelUrl? `<img class="label-img" src="${labelUrl}" alt="label">`:'';
 
     const chips = [
-      countryRegion && `<span class="badge flag">${countryRegion}</span>`,
-      f.Producer && `<span class="badge producer">🏷️ ${f.Producer}</span>`,
-      f.Grape && `<span class="badge grape">🍇 ${f.Grape}</span>`
-    ].filter(Boolean).join('');
+      chip([f.Country,f.Region].filter(Boolean).join(' – '),'chip-country'),
+      chip(f.Producer,'chip-producer'),
+      chip(f.Grape,'chip-grape'),
+    ].join(' ');
 
-    const info = [
-      f.Taste && `<div class="badge" style="display:block;white-space:normal;">🍷 ${f.Taste}</div>`,
-      f['Food Pairing'] && `<div class="badge" style="display:block;white-space:normal;">🍽️ ${f['Food Pairing']}</div>`,
-    ].filter(Boolean).join('');
+    const body = [
+      f.Taste? `<div class="badge chip-taste">${f.Taste}</div>`:'',
+      f['Food Pairing']? `<div class="badge">🍽️ ${f['Food Pairing']}</div>`:''
+    ].join('');
 
-    const meta2 = [
-      (f['Drinkable from']||f['Drinkable to']) && `<span class="badge">🕰️ ${[f['Drinkable from'], f['Drinkable to']].filter(Boolean).join(' – ')}</span>`,
-      (f.Price!=null && f.Price!=='') && `<span class="badge">💶 € ${Number(f.Price).toFixed(2)}</span>`,
-      `<span class="badge chip btn" id="cellar-slot-${rec.id}">📍 cellar</span>`
+    const bottom = [
+      fmtWindow(f['Drinkable from'], f['Drinkable to'])? `<span class="badge">⏱️ ${fmtWindow(f['Drinkable from'], f['Drinkable to'])}</span>`:'',
+      f['Price (€)']!=null && f['Price (€)']!==''? `<span class="badge">💶 ${fmtPrice(f['Price (€)'])}</span>`:'',
+      `<span class="badge cellar-chip" data-wine="${rec.id}">📍 cellar</span>`
     ].join(' ');
 
     return `
-      <div class="card wine-card" data-wine="${rec.id}">
-        ${img}
-        <div class="wine-info">
-          <div><b>${f.Name||''}</b>${f.Vintage ? ` — ${f.Vintage}` : ''}</div>
-          <div class="meta">${chips}</div>
-          <div style="margin-top:10px">${info}</div>
-          <div class="meta" style="margin-top:10px">${meta2}</div>
+      <div class="card wine-card">
+        ${labelImg}
+        <div class="wine-info" style="flex:1; position:relative">
+          <b>${f.Name||''}</b>${f.Vintage?` — ${f.Vintage}`:''}
+          <div class="meta" style="margin-top:6px">${chips}</div>
+          <p style="margin:10px 0 8px">${body}</p>
+          <div class="meta">${bottom}</div>
         </div>
-      </div>
-    `;
+      </div>`;
   }).join('');
+
+  // attach tooltip listeners after render
+  queueMicrotask(()=> bindCellarChips(records.map(r=>r.id)));
+  return out || '<p class="badge">No matches.</p>';
 }
 
-// After inserting cards into DOM: wire cellar tooltip + update cell names for clicks
-function afterRenderWines(records){
-  // Replace placeholder “unknown wine id” names with real names (for cell click popups)
-  records.forEach(r=>{
-    const positions = INV_BY_WINE.get(r.id) || [];
-    positions.forEach(p=>{
-      const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
-      const arr = CELL_LIST.get(id);
-      if (!arr) return;
-      arr.forEach(x => { if (x.wineId === r.id) x.name = r.fields?.Name || x.name; });
-    });
-  });
+// ---- Tooltip + highlight integration ----
+let locationIndex = null; // wineId -> [{rack,row,col,qty,name}]
+let cellIndex = null;     // "Rack|Row|Col" -> cell element
 
-  // Build cellar chip tooltips
-  records.forEach(r=>{
-    const slot = q(`#cellar-slot-${r.id}`);
-    if (!slot) return;
-    const positions = INV_BY_WINE.get(r.id) || [];
-    addCellarChip(slot.parentElement, positions);
-    // hide the placeholder chip itself; addCellarChip renders a new chip with tooltip
-    slot.remove();
+async function bindCellarChips(wineIds){
+  // ensure index loaded
+  if(!locationIndex) await buildLocationIndex();
+
+  document.querySelectorAll('.cellar-chip').forEach(el=>{
+    const wineId = el.getAttribute('data-wine');
+    const locs = locationIndex[wineId] || [];
+    el.addEventListener('mouseenter', (ev)=> showTooltip(ev.currentTarget, locs));
+    el.addEventListener('mouseleave', hideTooltip);
+    el.addEventListener('click', (ev)=> showTooltip(ev.currentTarget, locs, true));
   });
 }
 
-// Create a tooltip chip and wire hover/click highlighting
-function addCellarChip(containerEl, positions) {
-  const chip = document.createElement('span');
-  chip.className = 'badge chip btn';
-  chip.textContent = '📍 cellar';
-
-  const tip = document.createElement('div');
-  tip.className = 'tip';
-
-  if (!positions.length) {
-    tip.innerHTML = `<div class="tip-empty">No cellar location found.</div>`;
-  } else {
-    positions.forEach(p => {
-      const row = document.createElement('div');
-      row.className = 'tip-row';
-      row.textContent = `Rack ${p.rack} · Row ${p.row} · Col ${p.col} — Qty: ${p.qty}`;
-
-      // 🔥 On hover → rack cell glows continuously
-      row.addEventListener('mouseenter', () => {
-        const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
-        const el = document.getElementById(id);
-        if (el) {
-          el.classList.add('hover-highlight');
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+let tip;
+function showTooltip(target, locs, click=false){
+  hideTooltip();
+  tip = document.createElement('div');
+  tip.className = 'tooltip';
+  if(locs.length===0){
+    tip.textContent = 'No cellar location found.';
+  }else{
+    tip.innerHTML = locs.map(l =>
+      `<div class="line" data-key="${l.key}">
+        Rack ${l.rack} · Row ${l.row} · Col ${l.col} — Qty: ${l.qty}
+      </div>`
+    ).join('');
+    // hover highlight
+    tip.querySelectorAll('.line').forEach(line=>{
+      line.addEventListener('mouseenter', ()=>{
+        const k = line.getAttribute('data-key');
+        const cell = cellIndex[k]; if(!cell) return;
+        cell.classList.add('highlight');
       });
-
-      // 🧊 On leave → fade back to normal
-      row.addEventListener('mouseleave', () => {
-        const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
-        const el = document.getElementById(id);
-        if (el) el.classList.remove('hover-highlight');
+      line.addEventListener('mouseleave', ()=>{
+        const k = line.getAttribute('data-key');
+        const cell = cellIndex[k]; if(!cell) return;
+        cell.classList.remove('highlight');
       });
-
-      // 🖱️ On click → scroll & pulse briefly
-      row.addEventListener('click', () => {
-        const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
-        const el = document.getElementById(id);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el.classList.add('pulse');
-          setTimeout(() => el.classList.remove('pulse'), 1200);
-        }
+      line.addEventListener('click', ()=>{
+        const k = line.getAttribute('data-key');
+        const cell = cellIndex[k]; if(!cell) return;
+        cell.scrollIntoView({behavior:'smooth', block:'center'});
+        cell.classList.add('blink');
+        setTimeout(()=>cell.classList.remove('blink'), 1600);
       });
-
-      tip.appendChild(row);
     });
   }
-
   document.body.appendChild(tip);
+  const r = target.getBoundingClientRect();
+  tip.style.left = (r.left + r.width/2) + 'px';
+  tip.style.top  = (r.bottom + window.scrollY) + 'px';
+  if(click){ // keep visible on click
+    tip.style.pointerEvents = 'auto';
+  }
+}
+function hideTooltip(){ if(tip){ tip.remove(); tip=null; } }
 
-  // Show tooltip when hovering the “📍 cellar” chip
-  chip.addEventListener('mouseenter', () => {
-    const r = chip.getBoundingClientRect();
-    tip.style.left = `${r.left}px`;
-    tip.style.top = `${r.bottom + 6}px`;
-    tip.style.display = 'block';
-  });
+// ---- Cellar map (dynamic from Locations & Inventory) ----
+async function buildLocationIndex(){
+  locationIndex = {}; // wineId -> list
+  if(!S.base || !S.token) return;
 
-  chip.addEventListener('mouseleave', () => {
-    tip.style.display = 'none';
-    document.querySelectorAll('.hover-highlight').forEach(el => el.classList.remove('hover-highlight'));
-  });
+  // pull Inventory (wine + location + qty)
+  let records = [];
+  let offset = '';
+  do{
+    const url = `${baseURL(S.inv)}?fields[]=Wine%20(Link%20to%20Wines)&fields[]=Location%20(Link%20to%20Locations)&fields[]=Quantity${offset?`&offset=${offset}`:''}`;
+    const r = await fetch(url, { headers:H() });
+    const d = await r.json();
+    records = records.concat(d.records||[]);
+    offset = d.offset || '';
+  }while(offset);
 
-  containerEl.appendChild(chip);
+  // also load Locations rows we need for rack/row/col
+  const locIds = new Set();
+  for(const rec of records){
+    (rec.fields['Location (Link to Locations)']||[]).forEach(id => locIds.add(id));
+  }
+  const locMap = await fetchLocationMap(Array.from(locIds)); // id -> {rack,row,col}
+  // build
+  for(const rec of records){
+    const wineArr = rec.fields['Wine (Link to Wines)']||[];
+    const locArr  = rec.fields['Location (Link to Locations)']||[];
+    const qty     = Number(rec.fields['Quantity']||0);
+    for(const wid of wineArr){
+      for(const lid of locArr){
+        const l = locMap[lid]; if(!l) continue;
+        const key = `${l.rack}|${l.row}|${l.col}`;
+        (locationIndex[wid] ||= []).push({ ...l, qty, key });
+      }
+    }
+  }
 }
 
-// ---------- Boot ----------
-document.addEventListener('DOMContentLoaded', async ()=>{
-  // Wire search UI
-  q('#btn-search')?.addEventListener('click', e=>{ e.preventDefault(); search(); });
-  q('#q')?.addEventListener('keydown', e=>{ if (e.key==='Enter') search(); });
+async function fetchLocationMap(ids){
+  const map = {};
+  if(ids.length===0) return map;
+  for(let i=0;i<ids.length;i+=50){
+    const chunk = ids.slice(i,i+50);
+    const formula = `OR(${chunk.map(id=>`RECORD_ID()='${id}'`).join(',')})`;
+    const url = `${baseURL(S.loc)}?fields[]=Rack&fields[]=Row&fields[]=Column&filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+    const r = await fetch(url, { headers:H() }); const d = await r.json();
+    (d.records||[]).forEach(rec=>{
+      const f = rec.fields||{};
+      map[rec.id] = { rack:String(f.Rack||'1'), row: Number(f.Row||1), col: Number(f.Column||1) };
+    });
+  }
+  return map;
+}
 
-  // Load inventory/locations, build grid, then initial search (if any)
-  try{
-    await loadInventory();
-    buildCellarGrid();
-  }catch(e){ console.error(e); }
+async function buildCellarMap(){
+  const host = byId('cellar-map');
+  host.innerHTML = '<p class="badge">Loading…</p>';
+  if(!S.base || !S.token){ host.innerHTML = '<p class="badge">Add Base ID and Token, then Save.</p>'; return; }
 
-  if (q('#q')?.value) search();
-});
+  // Load ALL locations (for shape) and ALL inventory (for occupancy)
+  const [locs, inv] = await Promise.all([loadAllLocations(), loadAllInventory()]);
+
+  // Group locations by rack; also compute max row/col per rack
+  const byRack = new Map();
+  for(const L of locs){
+    const rack = String(L.rack||'1');
+    const list = byRack.get(rack) || [];
+    list.push(L);
+    byRack.set(rack, list);
+  }
+  // occupancy: set of keys
+  const full = new Set();
+  for(const item of inv){
+    if(item.qty>0 && item.rack && item.row && item.col){
+      full.add(`${item.rack}|${item.row}|${item.col}`);
+    }
+  }
+
+  // Build DOM
+  cellIndex = {};
+  const frag = document.createDocumentFragment();
+
+  for(const [rack, list] of byRack.entries()){
+    const maxRow = Math.max(...list.map(l=>Number(l.row||1)));
+    const maxCol = Math.max(...list.map(l=>Number(l.col||1)));
+
+    const title = document.createElement('div');
+    title.className='rack-title';
+    title.textContent = `Rack ${rack}`;
+    frag.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className='rack-grid';
+    grid.style.gridTemplateColumns = `repeat(${maxCol}, minmax(70px,1fr))`;
+
+    for(let r=1;r<=maxRow;r++){
+      for(let c=1;c<=maxCol;c++){
+        const cell = document.createElement('div');
+        cell.className='cell';
+        cell.textContent = `${r}-${c}`;
+        const key = `${rack}|${r}|${c}`;
+        if(full.has(key)) cell.classList.add('has');
+        cell.dataset.key = key;
+        cell.addEventListener('click', ()=> showWinesAtCell(rack,r,c));
+        grid.appendChild(cell);
+        cellIndex[key]=cell;
+      }
+    }
+    frag.appendChild(grid);
+  }
+
+  host.innerHTML='';
+  host.appendChild(frag);
+
+  // Refresh tooltip index for new cellIndex
+  await buildLocationIndex();
+}
+
+async function loadAllLocations(){
+  const list=[]; let offset='';
+  do{
+    const url = `${baseURL(S.loc)}?fields[]=Rack&fields[]=Row&fields[]=Column&fields[]=Name${offset?`&offset=${offset}`:''}`;
+    const r = await fetch(url,{headers:H()}); const d=await r.json();
+    (d.records||[]).forEach(rec=>{
+      const f=rec.fields||{};
+      list.push({ id:rec.id, rack:String(f.Rack||'1'), row:Number(f.Row||1), col:Number(f.Column||1), name:f.Name||'' });
+    });
+    offset = d.offset||'';
+  }while(offset);
+  return list;
+}
+
+async function loadAllInventory(){
+  const list=[]; let offset='';
+  do{
+    const url = `${baseURL(S.inv)}?fields[]=Wine%20(Link%20to%20Wines)&fields[]=Location%20(Link%20to%20Locations)&fields[]=Quantity${offset?`&offset=${offset}`:''}`;
+    const r = await fetch(url,{headers:H()}); const d=await r.json();
+    (d.records||[]).forEach(rec=>{
+      const f=rec.fields||{};
+      const qty = Number(f.Quantity||0);
+      const lids = f['Location (Link to Locations)']||[];
+      // need rack/row/col; we’ll fill via fetchLocationMap when building tooltip index
+      // for occupancy here we only mark after we know loc coords; simplest: skip, use index (buildLocationIndex) to compute full
+    });
+    offset = d.offset||'';
+  }while(offset);
+
+  // For the occupancy we’ll reuse buildLocationIndex (already fetched)
+  // To keep it simple: fetch locations & inventory to compute occupancy now:
+  // build a quick set by calling buildLocationIndex and merging
+  await buildLocationIndex();
+  const occ = [];
+  Object.values(locationIndex).forEach(arr => arr.forEach(l => occ.push(l)));
+  return occ.map(x => ({ rack:x.rack, row:x.row, col:x.col, qty:x.qty }));
+}
+
+async function showWinesAtCell(rack,row,col){
+  // list wines at that cell (using locationIndex)
+  await buildLocationIndex();
+  const key = `${rack}|${row}|${col}`;
+  const names = [];
+  for(const [wid, arr] of Object.entries(locationIndex)){
+    for(const l of arr){ if(l.key===key){ names.push(`${l.name||''}`); } }
+  }
+  alert(`Rack ${rack} · Row ${row} · Column ${col}\n\n` + (names.length? names.join('\n'): '(Empty)'));
+}
