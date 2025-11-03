@@ -190,7 +190,7 @@ async function bindCellarChips(wineIds){
       const r = el.getBoundingClientRect();
       tooltipEl.style.left = (r.left + r.width/2) + 'px';
       tooltipEl.style.top  = (r.bottom + window.scrollY) + 'px';
-      tooltipEl.style.pointerEvents = sticky ? 'auto' : 'none';
+      tooltipEl.style.pointerEvents = sticky ? 'auto';
     };
 
     el.addEventListener('mouseenter', ()=> show(false));
