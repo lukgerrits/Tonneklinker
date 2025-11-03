@@ -66,6 +66,14 @@ a{ color:#9dd5d5 }
 }
 .tip-empty{ opacity:.7; padding:6px 4px }
 
+/* --- Tooltip hover color for linked rack cell --- */
+.cell.hover-highlight {
+  background: #24573a;
+  border-color: #46f6a3;
+  box-shadow: 0 0 16px 4px rgba(70,246,163,.6);
+  transform: scale(1.05);
+  transition: all 0.25s ease;
+}
 /* ---------- Cellar map ---------- */
 .cellar-note{ opacity:.7; font-size:13px; margin:4px 0 12px; }
 
