@@ -1,6 +1,6 @@
-// ---- Tonneklinker app.js (v52) ----
+// ─── Tonneklinker app.js v53 ────────────────────────────────────────────────
 
-// Persistent settings
+// Local settings
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
   set base(v){ localStorage.setItem('tk_base', v); },
@@ -14,10 +14,19 @@ const S = {
   set loc(v){ localStorage.setItem('tk_loc', v); }
 };
 
-const q = (sel) => document.querySelector(sel);
-const headers = () => ({ 'Authorization': 'Bearer ' + S.token, 'Content-Type': 'application/json' });
+const q = s => document.querySelector(s);
+const headers = () => ({ 'Authorization':'Bearer '+S.token, 'Content-Type':'application/json' });
 
-// ---------- SETTINGS ----------
+function esc(s){ return String(s||'').replace(/'/g,"''"); }
+function norm(s){ return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase(); }
+function fmtPrice(p){ if(p===''||p==null) return ''; const n=Number(p); return isFinite(n)?'€ '+n.toFixed(2):p; }
+function fmtWindow(f,t){ if(!f&&!t) return ''; if(f&&t) return `${f} – ${t}`; return f?`from ${f}`:`until ${t}`; }
+
+// Flag + grape emoji maps (extend as needed)
+const flag = { Frankrijk:'🇫🇷', Italië:'🇮🇹', Oostenrijk:'🇦🇹', Spanje:'🇪🇸', Duitsland:'🇩🇪', Portugal:'🇵🇹', België:'🇧🇪' };
+const grapeIcon = '🍇';
+
+// Settings wiring
 function saveSettings(){
   S.base = q('#airtableBase').value.trim();
   S.token = q('#airtableToken').value.trim();
@@ -25,370 +34,350 @@ function saveSettings(){
   S.inv   = q('#inventoryTable').value.trim();
   S.loc   = q('#locationsTable').value.trim();
   alert('Saved locally.');
-  renderCellarMap(); // refresh map after any setting changes
+  buildCellarMap(); // refresh occupancy
 }
 
-let _handlersBound = false;
 document.addEventListener('DOMContentLoaded', () => {
-  const set = (id,val)=>{ const el=q(id); if(el) el.value=val; };
-  set('#airtableBase', S.base);
-  set('#airtableToken', S.token);
-  set('#winesTable', S.wines);
-  set('#inventoryTable', S.inv);
-  set('#locationsTable', S.loc);
+  // seed inputs
+  [['#airtableBase',S.base],['#airtableToken',S.token],['#winesTable',S.wines],['#inventoryTable',S.inv],['#locationsTable',S.loc]]
+    .forEach(([id,val])=>{ const el=q(id); if(el) el.value = val; });
 
-  if (!_handlersBound){
-    q('#btn-save')?.addEventListener('click', e=>{ e.preventDefault(); saveSettings(); });
-    q('#btn-search')?.addEventListener('click', e=>{ e.preventDefault(); search(); });
-    q('#q')?.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
-    _handlersBound = true;
-  }
+  // handlers
+  q('#btn-save')?.addEventListener('click', e=>{e.preventDefault(); saveSettings();});
+  q('#btn-search')?.addEventListener('click', e=>{e.preventDefault(); search();});
+  q('#q')?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); search(); }});
 
-  // build cellar map on load
-  renderCellarMap();
+  // modal handlers
+  q('#btn-open-add')?.addEventListener('click', ()=> q('#add-modal').classList.add('open'));
+  q('#btn-cancel-add')?.addEventListener('click', ()=> q('#add-modal').classList.remove('open'));
+  q('#btn-save-add')?.addEventListener('click', addWineFlow);
+
+  // initial map
+  buildCellarMap();
 });
 
-// ---------- UTIL ----------
-function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
-function norm(s){
-  return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
-}
-
-// ---------- SEARCH ----------
-let _searchAbort;
-
+// ── SEARCH ──────────────────────────────────────────────────────────────────
+let _abort;
 async function search(){
-  const termEl = q('#q');
-  const raw = (termEl ? termEl.value : '').trim();
+  const term = (q('#q')?.value||'').trim();
   const out = q('#results');
+  if(!S.base||!S.token){ alert('Set Base ID and Token in Settings.'); return; }
+  if(!term){ out.innerHTML=''; return; }
 
-  if (!S.base || !S.token){ alert('Set Base ID and Token in Settings.'); return; }
-  if (!raw){ out.innerHTML = ''; return; }
+  try{ _abort?.abort(); }catch(_){}
+  _abort = new AbortController();
 
-  try { _searchAbort?.abort(); } catch(_) {}
-  _searchAbort = new AbortController();
+  const btn = q('#btn-search'); if(btn){ btn.disabled=true; btn.textContent='Searching…'; }
 
-  const btn = q('#btn-search');
-  if (btn){ btn.disabled = true; btn.textContent = 'Searching…'; }
-
-  const baseUrl   = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
-  const headersObj = { headers: headers(), signal: _searchAbort.signal };
-  const terms = raw.split(/\s+/).filter(Boolean);
-
-  // server AND search across all relevant fields
+  const baseUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`;
   const concat =
-    "CONCATENATE(" +
-      "{Name},' '," +
-      "{Vintage},' '," +
-      "{Country},' '," +
-      "{Region},' '," +
-      "{Grape},' '," +
-      "{Producer},' '," +
-      "{Taste},' '," +
-      "{Food Pairing},' '," +
-      "{Drinkable from},' '," +
-      "{Drinkable to}" +
-    ")";
-
-  const pieces  = terms.map(t => `SEARCH('${escAirtable(t)}', ${concat}) > 0`);
+    "CONCATENATE({Name},' ',{Producer},' ',{Vintage},' ',{Country},' ',{Region},' ',{Grape},' ',{Taste},' ',{Food Pairing},' ',{Drinkable from},' ',{Drinkable to})";
+  const terms = term.split(/\s+/).filter(Boolean);
+  const pieces = terms.map(t => `SEARCH('${esc(t)}', ${concat}) > 0`);
   const formula = pieces.length ? `AND(${pieces.join(',')})` : '1=1';
-  const url     = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+
+  const url = `${baseUrl}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
 
   try{
-    const r = await fetch(url, headersObj);
-    const data = r.ok ? await r.json() : { records: [] };
-    if (Array.isArray(data.records) && data.records.length){
-      out.innerHTML = renderSearchCards(data.records);
-      bindCellarChipHandlers();
-      return;
-    }
-
-    // client AND fallback if formula returns 0
-    const rAll = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
-    const all  = rAll.ok ? await rAll.json() : { records: [] };
-    const needles = terms.map(norm);
-    const rows = (all.records||[]).filter(rec=>{
-      const f = rec.fields || {};
-      const hay = norm([
-        f.Name, f.Vintage, f.Country, f.Region, f.Grape, f.Producer, f.Taste,
-        f['Food Pairing'], f['Drinkable from'], f['Drinkable to']
-      ].filter(Boolean).join(' '));
-      return needles.every(t => hay.includes(t));
-    });
-
-    out.innerHTML = rows.length ? renderSearchCards(rows) : '<p class="badge">No matches.</p>';
-    bindCellarChipHandlers();
-
-  }catch(err){
-    if (err.name !== 'AbortError'){
-      console.error(err);
-      out.innerHTML = `<p class="badge">Search error: ${err.message}</p>`;
-    }
+    const r = await fetch(url, {headers:headers(), signal:_abort.signal});
+    const data = await r.json();
+    out.innerHTML = renderSearchCards(data.records||[]);
+  }catch(e){
+    if(e.name!=='AbortError') out.innerHTML = `<p class="badge">Search error: ${e.message}</p>`;
   }finally{
-    if (btn){ btn.disabled = false; btn.textContent = 'Search'; }
+    if(btn){ btn.disabled=false; btn.textContent='Search'; }
   }
 }
 
-// ---------- RENDER SEARCH ----------
 function renderSearchCards(records){
-  const getText = (val) => {
-    if (val == null) return '';
-    if (typeof val === 'object') {
-      if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
-      if (val.value) return val.value;
-      if (val.text) return val.text;
-      if (val.content) return val.content;
-      if (val.name) return val.name;
-      if (val.url) return val.url;
-      return Object.values(val).join(', ');
-    }
-    if (Array.isArray(val)) return val.map(v => getText(v)).join(', ');
-    return String(val);
-  };
-
-  const flagMap = {
-    Frankrijk: '🇫🇷', Italië: '🇮🇹', Oostenrijk: '🇦🇹', Spanje: '🇪🇸',
-    Duitsland: '🇩🇪', Portugal: '🇵🇹', VerenigdeStaten: '🇺🇸', Zwitserland: '🇨🇭',
-    België: '🇧🇪', Slovenië: '🇸🇮', Griekenland: '🇬🇷'
-  };
-
-  const html = records.map(rec => {
-    const f = rec.fields || {};
-
-    const imgUrl = Array.isArray(f['Label Image'])
-      ? f['Label Image'][0]?.url
-      : (f['Label Image']?.url || '');
-    const labelImg = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
-
-    const country = getText(f.Country);
-    const region  = getText(f.Region);
-    const flag    = flagMap[country] || '🌍';
-    const countryRegion = [flag + ' ' + country, region].filter(Boolean).join(' – ');
-
+  if(!records.length) return '<p class="badge">No matches.</p>';
+  return records.map(rec=>{
+    const f = rec.fields||{};
+    const img = (Array.isArray(f['Label Image']) && f['Label Image'][0]?.url)
+      ? `<img src="${f['Label Image'][0].url}" class="label" alt="Label">` : '';
+    const locChip = `<span class="chip btn" data-cellar="${rec.id}">📍 cellar</span>`;
     const chips = [
-      countryRegion || null,
-      f.Producer ? `🏷️ ${getText(f.Producer)}` : null,
-      f.Grape ? `🍇 ${getText(f.Grape)}` : null,
+      [flag[f.Country]||'🌍', f.Country, '–', f.Region].filter(Boolean).join(' ') || null,
+      f.Producer ? `👤 ${f.Producer}` : null,
+      f.Grape ? `${grapeIcon} ${f.Grape}` : null,
       f.Taste ? `👅 ${getText(f.Taste)}` : null,
       f['Food Pairing'] ? `🍽️ ${getText(f['Food Pairing'])}` : null,
-      (f['Drinkable from'] || f['Drinkable to'])
-        ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
-        : null,
-      (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null,
-      `<button class="badge btn-cellar" data-wineid="${rec.id}" title="Show cellar location">📍 cellar</button>`
-    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
+      (f['Drinkable from'] || f['Drinkable to']) ? `🕰️ ${fmtWindow(f['Drinkable from'], f['Drinkable to'])}` : null,
+      (f.Price!=='' && f.Price!=null) ? `💶 ${fmtPrice(f.Price)}` : null,
+      locChip
+    ].filter(Boolean).map(x=>`<span class="chip">${x}</span>`).join(' ');
 
     return `
       <div class="card wine-card">
-        ${labelImg}
+        ${img}
         <div class="wine-info">
-          <b>${getText(f.Name) || ''}</b>${f.Vintage ? ` — ${getText(f.Vintage)}` : ''}
+          <b>${f.Name||''}</b>${f.Vintage?` — ${f.Vintage}`:''}
           <div class="meta">${chips}</div>
-          ${f.Description ? `<p class="note">${getText(f.Description)}</p>` : ''}
         </div>
       </div>`;
   }).join('');
-
-  return html || '<p class="badge">No matches.</p>';
 }
 
-// ---------- CELLAR CHIP ----------
-function bindCellarChipHandlers(){
-  document.querySelectorAll('.btn-cellar').forEach(btn=>{
-    btn.addEventListener('click', async (e)=>{
-      e.preventDefault();
-      const wineId = btn.dataset.wineid;
-      await showCellarForWine(wineId);
-    });
-  });
+function getText(val){
+  if(val==null) return '';
+  if(typeof val==='object'){
+    if(Array.isArray(val)) return val.map(getText).join(', ');
+    if(val.value) return val.value;
+    if(val.text) return val.text;
+    if(val.content) return val.content;
+    return Object.values(val).join(', ');
+  }
+  return String(val);
 }
 
-async function showCellarForWine(wineId){
+// Click on the “📍 cellar” chip -> resolve locations for that wine
+document.addEventListener('click', async (e)=>{
+  const chip = e.target.closest('[data-cellar]');
+  if(!chip) return;
+  const wineId = chip.getAttribute('data-cellar');
   try{
-    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?` +
-      `filterByFormula=${encodeURIComponent(`FIND('${wineId}', ARRAYJOIN({Wine (Link to Wines)}))`)}&maxRecords=100`;
-    const invRes = await fetch(invUrl, { headers: headers() });
-    const invData = await invRes.json();
+    const list = await fetchWineLocations(wineId);
+    if(!list.length){ alert('No cellar location found.'); return; }
+    // show grouped by rack/row/col
+    const lines = list.map(x => `• ${x.name} — Qty: ${x.qty}`).join('\n');
+    alert(lines);
+  }catch(err){ alert('Lookup error: '+err.message); }
+});
 
-    const rows = (invData.records || []).filter(r=>Array.isArray(r.fields?.['Location (Link to Locations)']) && r.fields['Location (Link to Locations)'].length);
+// Join Inventory -> Locations for a given Wine
+async function fetchWineLocations(wineId){
+  const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?filterByFormula=${encodeURIComponent(`FIND('${wineId}', ARRAYJOIN({Wine (Link to Wines)}))`)}&maxRecords=100`;
+  const inv = await (await fetch(invUrl,{headers:headers()})).json();
+  const locIds = new Set();
+  (inv.records||[]).forEach(r=> (r.fields['Location (Link to Locations)']||[]).forEach(id=>locIds.add(id)));
 
-    if (!rows.length){
-      alert('No cellar location found.');
+  if(!locIds.size) return [];
+
+  const arr = Array.from(locIds);
+  const names = {};
+  for(let i=0;i<arr.length;i+=50){
+    const chunk = arr.slice(i,i+50);
+    const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(`OR(${chunk.map(id=>`RECORD_ID()='${id}'`).join(',')})`)}&maxRecords=50`;
+    const r = await (await fetch(url,{headers:headers()})).json();
+    (r.records||[]).forEach(x=>{
+      const f=x.fields||{};
+      const label = `${f.Name || ''}${f.Rack?` — Rack ${f.Rack}`:''}${f.Row?` • Row ${f.Row}`:''}${f.Column?` • Column ${f.Column}`:''}`.trim();
+      names[x.id]=label||x.id;
+    });
+  }
+  const out=[];
+  (inv.records||[]).forEach(r=>{
+    const qty = r.fields.Quantity ?? 0;
+    const locs = r.fields['Location (Link to Locations)']||[];
+    locs.forEach(id=> out.push({name:names[id]||id, qty}));
+  });
+  return out;
+}
+
+// ── ADD WINE FLOW (with optional inventory row) ─────────────────────────────
+async function addWineFlow(){
+  if(!S.base||!S.token){ alert('Set Base ID and Token in Settings.'); return; }
+
+  const f = {
+    name: q('#nw-name').value.trim(),
+    producer: q('#nw-producer').value.trim(),
+    country: q('#nw-country').value.trim(),
+    region: q('#nw-region').value.trim(),
+    grape: q('#nw-grape').value.trim(),
+    label: q('#nw-label-url').value.trim(),
+    vintage: q('#nw-vintage').value.trim(),
+    from: q('#nw-drink-from').value.trim(),
+    to: q('#nw-drink-to').value.trim(),
+    price: q('#nw-price').value.trim(),
+    loc: q('#nw-location').value.trim(), // free text: e.g. Rack 1 Row 1 Col 1
+    qty: q('#nw-qty').value.trim()
+  };
+  if(!f.name){ alert('Name is required.'); return; }
+
+  // 1) Create wine
+  const winePayload = {
+    fields:{
+      Name:f.name, Producer:f.producer||undefined, Country:f.country||undefined, Region:f.region||undefined,
+      Grape:f.grape||undefined, Vintage: f.vintage? Number(f.vintage): undefined,
+      'Drinkable from': f.from? Number(f.from): undefined,
+      'Drinkable to': f.to? Number(f.to): undefined,
+      Price: f.price? Number(f.price): undefined,
+      'Label Image': f.label ? [{url:f.label}] : undefined
+    }
+  };
+  const wRes = await fetch(
+    `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}`,
+    {method:'POST', headers:headers(), body:JSON.stringify(winePayload)}
+  );
+  const wJson = await wRes.json();
+  if(!wRes.ok){ alert('Error saving wine: '+(wJson?.error?.message||wRes.status)); return; }
+
+  // 2) If a location string & qty provided, ensure Location exists & create Inventory
+  if(f.loc && f.qty){
+    const parsed = parseLocationString(f.loc); // {rack,row,col,name}
+    let locId = await findOrCreateLocation(parsed);
+
+    const invPayload = {
+      fields:{
+        'Wine (Link to Wines)':[wJson.id],
+        'Location (Link to Locations)':[locId],
+        Quantity: Number(f.qty)||0
+      }
+    };
+    const iRes = await fetch(
+      `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}`,
+      {method:'POST', headers:headers(), body:JSON.stringify(invPayload)}
+    );
+    if(!iRes.ok){
+      const j=await iRes.json();
+      alert('Error saving inventory: '+(j?.error?.message||iRes.status));
       return;
     }
-
-    const locIDs = [];
-    const locQty = {};
-    rows.forEach(r=>{
-      const qty = Number(r.fields?.Quantity ?? 0) || 0;
-      (r.fields['Location (Link to Locations)'] || []).forEach(id=>{
-        locIDs.push(id);
-        locQty[id] = (locQty[id] || 0) + qty;
-      });
-    });
-
-    const unique = Array.from(new Set(locIDs));
-    let locMap = {};
-    for (let i=0; i<unique.length; i+=50){
-      const chunk = unique.slice(i, i+50);
-      const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
-      const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
-      const res = await fetch(url, { headers: headers() });
-      const json = await res.json();
-      (json.records||[]).forEach(rec=>{
-        const f = rec.fields||{};
-        locMap[rec.id] = {
-          rack: f.Rack || '',
-          row:  f.Row  || '',
-          col:  f.Column || '' // optional
-        };
-      });
-    }
-
-    const lines = [];
-    Object.keys(locQty).forEach(locId=>{
-      const meta = locMap[locId] || {};
-      const rack = meta.rack || 'Rack ?';
-      const row  = meta.row  || 'Row ?';
-      const col  = meta.col  ? ` • Column ${meta.col}` : '';
-      lines.push(`${rack} • ${row}${col} — Qty: ${locQty[locId]}`);
-    });
-
-    alert(lines.join('\n'));
-  }catch(err){
-    console.error(err);
-    alert('No cellar location found.');
   }
+
+  // close + reset
+  q('#add-modal').classList.remove('open');
+  ['#nw-name','#nw-producer','#nw-country','#nw-region','#nw-grape','#nw-label-url','#nw-vintage','#nw-drink-from','#nw-drink-to','#nw-price','#nw-location','#nw-qty']
+    .forEach(id=>{ const el=q(id); if(el) el.value=''; });
+
+  // refresh
+  buildCellarMap();
+  search();
 }
 
-// ---------- CELLAR MAP (3 racks × 6 rows × 6 cols) ----------
-async function renderCellarMap(){
-  const host = q('#cellar-map');
-  if (!host) return;
-  host.innerHTML = ''; // reset
+function parseLocationString(s){
+  // very forgiving: “Rack 1 Row 2 Col 3”, or “Rack1 Row1 Col1”, or just a free Name
+  const mRack = s.match(/rack\s*(\d+)/i);
+  const mRow  = s.match(/row\s*(\d+)/i);
+  const mCol  = s.match(/col(?:umn)?\s*(\d+)/i);
+  return {
+    rack: mRack? Number(mRack[1]): null,
+    row : mRow ? Number(mRow[1]) : null,
+    col : mCol ? Number(mCol[1]) : null,
+    name: s.trim()
+  };
+}
+async function findOrCreateLocation(p){
+  // Try exact name first
+  const byNameUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(`{Name}='${esc(p.name)}'`)}&maxRecords=1`;
+  let r = await (await fetch(byNameUrl,{headers:headers()})).json();
+  if(r.records?.length) return r.records[0].id;
 
-  // build empty 3 racks
-  for (let r=1; r<=3; r++){
-    const rackDiv = document.createElement('div');
-    rackDiv.className = 'rack';
-    rackDiv.innerHTML = `<h4>Rack ${r}</h4>`;
+  // Otherwise create
+  const payload = { fields:{ Name:p.name, Rack:p.rack||undefined, Row:p.row||undefined, Column:p.col||undefined } };
+  const c = await fetch(`https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}`,
+    {method:'POST', headers:headers(), body:JSON.stringify(payload)});
+  const j = await c.json();
+  if(!c.ok) throw new Error(j?.error?.message||c.status);
+  return j.id;
+}
+
+// ── CELLAR MAP (3 racks × 6×6) with live occupancy ─────────────────────────
+async function buildCellarMap(){
+  const wrap = q('#cellar-map');
+  if(!wrap) return;
+  wrap.innerHTML = '';
+
+  // Prepare 3 racks of 6×6
+  const racks = [1,2,3];
+  const rows = 6, cols = 6;
+
+  // Fetch occupancy from Inventory/Locations
+  const occ = await loadOccupancy();
+
+  racks.forEach(rk=>{
+    const title = document.createElement('div');
+    title.className='rack-title';
+    title.textContent = `Rack ${rk}`;
+    wrap.appendChild(title);
+
     const grid = document.createElement('div');
-    grid.className = 'grid-6';
-    // fill 6x6
-    for (let row=1; row<=6; row++){
-      for (let col=1; col<=6; col++){
+    grid.className='cellar-grid';
+    grid.style.gridTemplateColumns = `repeat(${cols},1fr)`;
+
+    for(let r=1;r<=rows;r++){
+      for(let c=1;c<=cols;c++){
+        const id = `R${rk}-r${r}-c${c}`;
         const cell = document.createElement('div');
-        cell.className = 'slot';
-        cell.textContent = `${row}-${col}`;
-        // attach data
-        cell.dataset.rack = `Rack ${r}`;
-        cell.dataset.row  = `Row ${row}`;
-        cell.dataset.col  = String(col);
+        cell.className='cell';
+        cell.dataset.rack=rk; cell.dataset.row=r; cell.dataset.col=c;
+        cell.textContent = `${r}-${c}`;
+        const have = occ[id];
+        if(have && have.length){
+          cell.classList.add('has');
+          cell.addEventListener('click', ()=>{
+            // list wines in this position
+            const lines = have.map(x=>`• ${x.wine} — Qty: ${x.qty}`).join('\n');
+            alert(`Rack ${rk} • Row ${r} • Column ${c}\n\n${lines}`);
+          });
+        }else{
+          cell.addEventListener('click', ()=> alert(`Rack ${rk} • Row ${r} • Column ${c}\n\n(Empty)`));
+        }
         grid.appendChild(cell);
       }
     }
-    rackDiv.appendChild(grid);
-    host.appendChild(rackDiv);
-  }
+    wrap.appendChild(grid);
+  });
+}
 
-  // paint green (has inventory) & bind click
+// returns { "R1-r1-c1":[{wine,qty}], ... }
+async function loadOccupancy(){
+  const out = {};
   try{
-    if (!S.base || !S.token) return; // nothing to fetch yet
+    if(!S.base||!S.token) return out;
+    // Get full inventory (keep it simple; bases are small)
+    const invAll = await (await fetch(
+      `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=200`,
+      {headers:headers()}
+    )).json();
 
-    // Fetch all inventory rows
-    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=300`;
-    const invRes = await fetch(invUrl, { headers: headers() });
-    const invData = await invRes.json();
-
-    const wineIDs = new Set();
-    const locIDs  = new Set();
-    const invRows = invData.records || [];
-    invRows.forEach(r=>{
-      (r.fields?.['Wine (Link to Wines)'] || []).forEach(id => wineIDs.add(id));
-      (r.fields?.['Location (Link to Locations)'] || []).forEach(id => locIDs.add(id));
+    // gather all location ids & wine names
+    const locSet = new Set(), wineSet = new Set();
+    (invAll.records||[]).forEach(r=>{
+      (r.fields['Location (Link to Locations)']||[]).forEach(id=>locSet.add(id));
+      (r.fields['Wine (Link to Wines)']||[]).forEach(id=>wineSet.add(id));
     });
 
-    // Build maps
-    const wineMap = await fetchNameMap(S.wines, Array.from(wineIDs), ['Name','Vintage']);
-    const locMeta = await fetchLocMeta(Array.from(locIDs)); // {id:{rack,row,col}}
-
-    // Aggregate occupancy by rack-row-col
-    const occ = {}; // key: Rack|Row|Col -> [{name,qty}]
-    invRows.forEach(r=>{
-      const qty = Number(r.fields?.Quantity ?? 0) || 0;
-      const wines = r.fields?.['Wine (Link to Wines)'] || [];
-      const locs  = r.fields?.['Location (Link to Locations)'] || [];
-      if (!qty || !wines.length || !locs.length) return;
-
-      wines.forEach(wid=>{
-        const w = wineMap[wid];
-        const wname = w ? `${w.Name || ''}${w.Vintage ? ' — '+w.Vintage : ''}` : wid;
-        locs.forEach(lid=>{
-          const m = locMeta[lid];
-          if (!m) return;
-          const rack = m.rack || 'Rack 1';
-          const row  = m.row  || 'Row 1';
-          const col  = m.col  || '1';
-          const key = `${rack}|${row}|${col}`;
-          if (!occ[key]) occ[key] = [];
-          occ[key].push({ name: wname, qty });
+    // fetch locations -> rack,row,col,name
+    const locMap = {};
+    if(locSet.size){
+      const arr = Array.from(locSet);
+      for(let i=0;i<arr.length;i+=50){
+        const chunk = arr.slice(i,i+50);
+        const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(`OR(${chunk.map(id=>`RECORD_ID()='${id}'`).join(',')})`)}&maxRecords=50`;
+        const j = await (await fetch(url,{headers:headers()})).json();
+        (j.records||[]).forEach(x=>{
+          const f=x.fields||{};
+          const key = `R${f.Rack||0}-r${f.Row||0}-c${f.Column||0}`;
+          locMap[x.id] = { key, name:f.Name||'' };
         });
+      }
+    }
+
+    // fetch wine names
+    const wineName = {};
+    if(wineSet.size){
+      const arr = Array.from(wineSet);
+      for(let i=0;i<arr.length;i+=50){
+        const chunk = arr.slice(i,i+50);
+        const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.wines)}?filterByFormula=${encodeURIComponent(`OR(${chunk.map(id=>`RECORD_ID()='${id}'`).join(',')})`)}&maxRecords=50&fields[]=Name`;
+        const j = await (await fetch(url,{headers:headers()})).json();
+        (j.records||[]).forEach(x=> wineName[x.id] = x.fields?.Name || x.id);
+      }
+    }
+
+    (invAll.records||[]).forEach(r=>{
+      const qty = r.fields.Quantity ?? 0;
+      const wines = r.fields['Wine (Link to Wines)']||[];
+      const locs  = r.fields['Location (Link to Locations)']||[];
+      locs.forEach(locId=>{
+        const loc = locMap[locId];
+        if(!loc) return;
+        if(!out[loc.key]) out[loc.key]=[];
+        wines.forEach(w=> out[loc.key].push({wine:wineName[w]||w, qty}));
       });
     });
 
-    // Paint cells that have wines
-    document.querySelectorAll('.slot').forEach(slot=>{
-      const rack = slot.dataset.rack;
-      const row  = slot.dataset.row;
-      const col  = slot.dataset.col;
-      const key  = `${rack}|${row}|${col}`;
-      if (occ[key] && occ[key].length){
-        slot.classList.add('has');
-        slot.addEventListener('click', ()=>{
-          const lines = occ[key].map(x=>`• ${x.name} — Qty: ${x.qty}`);
-          alert(`${rack} • ${row} • Column ${col}\n\n${lines.join('\n')}`);
-        });
-      }else{
-        // keep visible & clickable (shows empty)
-        slot.addEventListener('click', ()=>{
-          alert(`${rack} • ${row} • Column ${col}\n\n(Empty)`);
-        });
-      }
-    });
-
-  }catch(err){
-    console.error('Cellar map error', err);
-    // still keep grid visible
-  }
-}
-
-async function fetchNameMap(tableName, ids, fields){
-  const map = {};
-  if (!ids.length) return map;
-  for (let i = 0; i < ids.length; i += 50){
-    const chunk = ids.slice(i, i+50);
-    const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
-    const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(tableName)}?filterByFormula=${encodeURIComponent(formula)}${fields?.length ? fields.map(f=>`&fields[]=${encodeURIComponent(f)}`).join('') : ''}&maxRecords=50`;
-    const res = await fetch(url, { headers: headers() });
-    const json = await res.json();
-    (json.records || []).forEach(rec => map[rec.id] = rec.fields || {});
-  }
-  return map;
-}
-
-async function fetchLocMeta(ids){
-  const map = {};
-  if (!ids.length) return map;
-  for (let i = 0; i < ids.length; i += 50){
-    const chunk = ids.slice(i, i+50);
-    const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
-    const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&fields[]=Rack&fields[]=Row&fields[]=Column&maxRecords=50`;
-    const res = await fetch(url, { headers: headers() });
-    const json = await res.json();
-    (json.records || []).forEach(rec=>{
-      const f = rec.fields || {};
-      map[rec.id] = { rack: f.Rack || '', row: f.Row || '', col: f.Column || '' };
-    });
-  }
-  return map;
+  }catch(_){}
+  return out;
 }
