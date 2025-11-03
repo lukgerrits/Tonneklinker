@@ -1,128 +1,67 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tonneklinker · Cellar</title>
-  <link rel="icon" type="image/png" href="icon-192.png?v=50" />
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=50" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Tonneklinker</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <meta name="theme-color" content="#5A0E2E"/>
+  <link rel="stylesheet" href="./styles.css?v=52">
   <style>
-    /* minimal map styling that piggybacks on your dark theme */
-    .rack {
-      margin: 12px 0 18px;
-      padding: 12px;
-      border: 1px solid #333;
-      border-radius: 12px;
-      background: #111;
-    }
-    .rack h3 { margin: 0 0 8px; font-size: 1rem; color: #ddd; }
-    .grid-map {
-      display: grid;
-      gap: 6px;
-    }
-    .cell {
-      background: #1b1b1b;
-      border: 1px solid #2f2f2f;
-      border-radius: 8px;
-      height: 34px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: .85rem;
-      color: #aaa;
-      cursor: pointer;
-      user-select: none;
-      position: relative;
-    }
-    .cell.occupied { background: #153d2a; border-color: #2e6d4f; color: #cfe9da; }
-    .cell:hover { outline: 1px dashed #555; }
-    .legend { margin: 6px 0 12px; color: #aaa; font-size: .9rem; }
+    /* page bits that aren’t in styles.css */
+    .badge.btn-cellar{ cursor:pointer; }
+    .rack { margin:16px 0 24px; }
+    .rack h4 { margin:0 0 8px; }
+    .grid-6 { display:grid; grid-template-columns: repeat(6,minmax(52px,1fr)); gap:6px; }
+    .slot { padding:8px 0; text-align:center; border:1px solid #333; border-radius:8px; background:#141414; color:#888; }
+    .slot.has { background:#0f2a20; color:#b7ffd7; border-color:#1f6b4e; cursor:pointer; }
+    .slot:hover { filter:brightness(1.05); }
+    .note { margin:10px 0 0; color:#bbb; line-height:1.4; }
   </style>
 </head>
-
 <body>
-  <!-- ===== Header ===== -->
-  <header style="display:flex;align-items:center;gap:12px;padding:8px 12px;">
-    <img class="logo" src="icon-192.png?v=50" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px;" />
-    <h1 style="margin-right:auto;font-size:1.4rem;">Tonneklinker · Cellar</h1>
-    <button id="btn-open-add" class="btn">+ Add Wine</button>
-    <nav style="margin-left:8px;">
-      <a href="./mobile.html" class="badge">Mobile</a>
-    </nav>
+  <header>
+    <img class="logo" src="icon-192.png?v=52" alt="Tonneklinker"/>
+    <h1>Tonneklinker · Cellar</h1>
+    <nav style="margin-left:auto"><a href="./mobile.html" class="badge">Mobile</a></nav>
   </header>
 
-  <!-- ===== Main ===== -->
   <main class="container">
-    <!-- Search -->
+
     <section class="card">
       <h2>Search Wines</h2>
       <div class="grid cols-2">
-        <input id="q" placeholder="Search by name, producer, grape, vintage…" />
-        <button id="btn-search" class="btn">Search</button>
+        <input id="q" placeholder="Search by name, producer, grape, vintage…"/>
+        <button id="btn-search">Search</button>
       </div>
-      <div id="results" style="margin-top:12px;"></div>
+      <div id="results" style="margin-top:12px"></div>
     </section>
 
-    <!-- Cellar Map -->
     <section class="card">
       <h2>Cellar Map</h2>
-      <p class="legend">Green cells have bottles. Click a cell to see wines there.</p>
-      <div id="cellar-map" style="margin-top:8px;"></div>
+      <p class="badge">Green cells have bottles. Click a cell to see wines there.</p>
+      <div id="cellar-map"></div>
     </section>
 
-    <!-- Settings -->
     <section class="card">
       <h2>Settings</h2>
       <div class="grid cols-2">
-        <input id="airtableBase" placeholder="Airtable Base ID" />
-        <input id="airtableToken" placeholder="Airtable Personal Access Token" />
-        <input id="winesTable" placeholder="Wines table name" />
-        <input id="inventoryTable" placeholder="Inventory table name" />
-        <input id="locationsTable" placeholder="Locations table name" />
+        <input id="airtableBase" placeholder="Airtable Base ID"/>
+        <input id="airtableToken" placeholder="Airtable Personal Access Token"/>
+        <input id="winesTable" value="Wines" placeholder="Wines table"/>
+        <input id="inventoryTable" value="Inventory" placeholder="Inventory table"/>
+        <input id="locationsTable" value="Locations" placeholder="Locations table"/>
+        <button id="btn-save">Save</button>
       </div>
-      <button id="btn-save" class="btn" style="margin-top:10px;">Save</button>
-      <p class="badge" style="margin-top:10px;">Your token is stored locally on this device only.</p>
+      <p class="badge">Your token is stored locally on this device only.</p>
     </section>
+
   </main>
 
-  <!-- ===== Add Wine Modal ===== -->
-  <div id="add-modal" class="modal" aria-hidden="true" style="display:none;">
-    <div class="modal-content card">
-      <h3>+ Add Wine</h3>
-      <div class="grid cols-2">
-        <input id="nw-name" placeholder="Name *" />
-        <input id="nw-vintage" placeholder="Vintage (e.g. 2019)" />
-        <input id="nw-producer" placeholder="Producer (e.g. Pietroso)" />
-        <input id="nw-country" placeholder="Country" />
-        <input id="nw-region" placeholder="Region" />
-        <input id="nw-grape" placeholder="Grape (e.g. Nebbiolo)" />
-        <input id="nw-label-url" placeholder="Label Image URL (optional)" />
-        <input id="nw-price" placeholder="Price (e.g. 39.95)" />
-        <input id="nw-drink-from" placeholder="Drinkable from (e.g. 2025)" />
-        <input id="nw-drink-to" placeholder="Drinkable to (e.g. 2032)" />
-      </div>
+  <footer>© Tonneklinker</footer>
 
-      <h4 style="margin-top:10px;">Inventory (optional)</h4>
-      <div class="grid cols-2">
-        <input id="nw-location" placeholder="Location / Rack (e.g. Rack 1 Row 5)" />
-        <input id="nw-qty" placeholder="Quantity (e.g. 3)" />
-      </div>
-
-      <div class="grid cols-2" style="margin-top:12px;">
-        <button id="btn-cancel-add" class="btn btn-alt">Cancel</button>
-        <button id="btn-save-add" class="btn">Save</button>
-      </div>
-
-      <p class="badge" style="margin-top:10px;">Taste & Food Pairing will be generated automatically by Airtable AI (in Dutch).</p>
-    </div>
-  </div>
-
-  <!-- Tooltip for cellar info -->
-  <div id="cellar-tooltip" class="badge" style="position:absolute; display:none; z-index:2000;"></div>
-
-  <footer style="text-align:center;margin:20px;">© Tonneklinker</footer>
-
-  <script src="app.js?v=51"></script>
+  <script src="./app.js?v=52"></script>
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./service-worker.js?v=52');}</script>
 </body>
 </html>
