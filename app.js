@@ -1,5 +1,4 @@
-<script>
-// ---- Tonneklinker app.js (v51) ----
+// ---- Tonneklinker app.js (v52) ----
 
 // Persistent settings
 const S = {
@@ -26,6 +25,7 @@ function saveSettings(){
   S.inv   = q('#inventoryTable').value.trim();
   S.loc   = q('#locationsTable').value.trim();
   alert('Saved locally.');
+  renderCellarMap(); // refresh map after any setting changes
 }
 
 let _handlersBound = false;
@@ -38,33 +38,23 @@ document.addEventListener('DOMContentLoaded', () => {
   set('#locationsTable', S.loc);
 
   if (!_handlersBound){
-    const saveBtn = q('#btn-save');
-    if (saveBtn) saveBtn.addEventListener('click', e=>{ e.preventDefault(); saveSettings(); });
-
-    const searchBtn = q('#btn-search');
-    if (searchBtn){
-      searchBtn.type = 'button';
-      searchBtn.addEventListener('click', e=>{ e.preventDefault(); search(); });
-    }
-
-    const searchInput = q('#q');
-    if (searchInput){
-      searchInput.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
-    }
+    q('#btn-save')?.addEventListener('click', e=>{ e.preventDefault(); saveSettings(); });
+    q('#btn-search')?.addEventListener('click', e=>{ e.preventDefault(); search(); });
+    q('#q')?.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
     _handlersBound = true;
   }
 
-  // If you still show inventory elsewhere, you can keep this.
-  // Map grid stays always visible; nothing is hidden.
-  loadInventory(); // safe no-op if you removed its section
+  // build cellar map on load
+  renderCellarMap();
 });
 
-// ---------- SEARCH ----------
+// ---------- UTIL ----------
 function escAirtable(s){ return String(s||'').replace(/'/g,"''"); }
 function norm(s){
   return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
 }
 
+// ---------- SEARCH ----------
 let _searchAbort;
 
 async function search(){
@@ -85,6 +75,7 @@ async function search(){
   const headersObj = { headers: headers(), signal: _searchAbort.signal };
   const terms = raw.split(/\s+/).filter(Boolean);
 
+  // server AND search across all relevant fields
   const concat =
     "CONCATENATE(" +
       "{Name},' '," +
@@ -108,12 +99,11 @@ async function search(){
     const data = r.ok ? await r.json() : { records: [] };
     if (Array.isArray(data.records) && data.records.length){
       out.innerHTML = renderSearchCards(data.records);
-      // bind cellar chip click handlers
       bindCellarChipHandlers();
       return;
     }
 
-    // fallback client AND
+    // client AND fallback if formula returns 0
     const rAll = await fetch(`${baseUrl}?maxRecords=200`, headersObj);
     const all  = rAll.ok ? await rAll.json() : { records: [] };
     const needles = terms.map(norm);
@@ -139,80 +129,7 @@ async function search(){
   }
 }
 
-// ---------- CELLAR CHIP HANDLER ----------
-function bindCellarChipHandlers(){
-  document.querySelectorAll('.btn-cellar').forEach(btn=>{
-    btn.addEventListener('click', async (e)=>{
-      e.preventDefault();
-      const wineId = btn.dataset.wineid;
-      await showCellarForWine(wineId);
-    });
-  });
-}
-
-async function showCellarForWine(wineId){
-  try{
-    // 1) Find all inventory rows that reference this Wine record
-    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?` +
-      `filterByFormula=${encodeURIComponent(`FIND('${wineId}', ARRAYJOIN({Wine (Link to Wines)}))`)}&maxRecords=100`;
-    const invRes = await fetch(invUrl, { headers: headers() });
-    const invData = await invRes.json();
-
-    const rows = (invData.records || []).filter(r=>Array.isArray(r.fields?.['Location (Link to Locations)']) && r.fields['Location (Link to Locations)'].length);
-
-    if (!rows.length){
-      alert('No cellar location found.');
-      return;
-    }
-
-    // 2) Collect location IDs & quantities
-    const locIDs = [];
-    const locQty = {}; // key: locId -> total qty for this wine at that loc
-    rows.forEach(r=>{
-      const qty = Number(r.fields?.Quantity ?? 0) || 0;
-      (r.fields['Location (Link to Locations)'] || []).forEach(id=>{
-        locIDs.push(id);
-        locQty[id] = (locQty[id] || 0) + qty;
-      });
-    });
-
-    // 3) Fetch those locations to get Rack/Row/Column
-    const unique = Array.from(new Set(locIDs));
-    let locMap = {};
-    for (let i=0; i<unique.length; i+=50){
-      const chunk = unique.slice(i, i+50);
-      const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
-      const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
-      const res = await fetch(url, { headers: headers() });
-      const json = await res.json();
-      (json.records||[]).forEach(rec=>{
-        const f = rec.fields||{};
-        locMap[rec.id] = {
-          rack: f.Rack || '',
-          row:  f.Row  || '',
-          col:  f.Column || ''
-        };
-      });
-    }
-
-    // 4) Build a readable list
-    const lines = [];
-    Object.keys(locQty).forEach(locId=>{
-      const meta = locMap[locId] || {};
-      const rack = meta.rack || 'Rack ?';
-      const row  = meta.row  || 'Row ?';
-      const col  = meta.col  ? ` • Column ${meta.col}` : '';
-      lines.push(`${rack} • ${row}${col} — Qty: ${locQty[locId]}`);
-    });
-
-    alert(lines.join('\n'));
-  }catch(err){
-    console.error(err);
-    alert('No cellar location found.');
-  }
-}
-
-// ---------- RENDER ----------
+// ---------- RENDER SEARCH ----------
 function renderSearchCards(records){
   const getText = (val) => {
     if (val == null) return '';
@@ -258,7 +175,6 @@ function renderSearchCards(records){
         ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
       (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null,
-      // Cellar chip (wired to handler)
       `<button class="badge btn-cellar" data-wineid="${rec.id}" title="Show cellar location">📍 cellar</button>`
     ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
 
@@ -276,9 +192,203 @@ function renderSearchCards(records){
   return html || '<p class="badge">No matches.</p>';
 }
 
-// ---------- INVENTORY (optional; safe to leave) ----------
-async function loadInventory(){
-  // Keep whatever you had; leaving racks always visible requires no change here.
+// ---------- CELLAR CHIP ----------
+function bindCellarChipHandlers(){
+  document.querySelectorAll('.btn-cellar').forEach(btn=>{
+    btn.addEventListener('click', async (e)=>{
+      e.preventDefault();
+      const wineId = btn.dataset.wineid;
+      await showCellarForWine(wineId);
+    });
+  });
 }
 
-</script>
+async function showCellarForWine(wineId){
+  try{
+    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?` +
+      `filterByFormula=${encodeURIComponent(`FIND('${wineId}', ARRAYJOIN({Wine (Link to Wines)}))`)}&maxRecords=100`;
+    const invRes = await fetch(invUrl, { headers: headers() });
+    const invData = await invRes.json();
+
+    const rows = (invData.records || []).filter(r=>Array.isArray(r.fields?.['Location (Link to Locations)']) && r.fields['Location (Link to Locations)'].length);
+
+    if (!rows.length){
+      alert('No cellar location found.');
+      return;
+    }
+
+    const locIDs = [];
+    const locQty = {};
+    rows.forEach(r=>{
+      const qty = Number(r.fields?.Quantity ?? 0) || 0;
+      (r.fields['Location (Link to Locations)'] || []).forEach(id=>{
+        locIDs.push(id);
+        locQty[id] = (locQty[id] || 0) + qty;
+      });
+    });
+
+    const unique = Array.from(new Set(locIDs));
+    let locMap = {};
+    for (let i=0; i<unique.length; i+=50){
+      const chunk = unique.slice(i, i+50);
+      const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
+      const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=50`;
+      const res = await fetch(url, { headers: headers() });
+      const json = await res.json();
+      (json.records||[]).forEach(rec=>{
+        const f = rec.fields||{};
+        locMap[rec.id] = {
+          rack: f.Rack || '',
+          row:  f.Row  || '',
+          col:  f.Column || '' // optional
+        };
+      });
+    }
+
+    const lines = [];
+    Object.keys(locQty).forEach(locId=>{
+      const meta = locMap[locId] || {};
+      const rack = meta.rack || 'Rack ?';
+      const row  = meta.row  || 'Row ?';
+      const col  = meta.col  ? ` • Column ${meta.col}` : '';
+      lines.push(`${rack} • ${row}${col} — Qty: ${locQty[locId]}`);
+    });
+
+    alert(lines.join('\n'));
+  }catch(err){
+    console.error(err);
+    alert('No cellar location found.');
+  }
+}
+
+// ---------- CELLAR MAP (3 racks × 6 rows × 6 cols) ----------
+async function renderCellarMap(){
+  const host = q('#cellar-map');
+  if (!host) return;
+  host.innerHTML = ''; // reset
+
+  // build empty 3 racks
+  for (let r=1; r<=3; r++){
+    const rackDiv = document.createElement('div');
+    rackDiv.className = 'rack';
+    rackDiv.innerHTML = `<h4>Rack ${r}</h4>`;
+    const grid = document.createElement('div');
+    grid.className = 'grid-6';
+    // fill 6x6
+    for (let row=1; row<=6; row++){
+      for (let col=1; col<=6; col++){
+        const cell = document.createElement('div');
+        cell.className = 'slot';
+        cell.textContent = `${row}-${col}`;
+        // attach data
+        cell.dataset.rack = `Rack ${r}`;
+        cell.dataset.row  = `Row ${row}`;
+        cell.dataset.col  = String(col);
+        grid.appendChild(cell);
+      }
+    }
+    rackDiv.appendChild(grid);
+    host.appendChild(rackDiv);
+  }
+
+  // paint green (has inventory) & bind click
+  try{
+    if (!S.base || !S.token) return; // nothing to fetch yet
+
+    // Fetch all inventory rows
+    const invUrl = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.inv)}?maxRecords=300`;
+    const invRes = await fetch(invUrl, { headers: headers() });
+    const invData = await invRes.json();
+
+    const wineIDs = new Set();
+    const locIDs  = new Set();
+    const invRows = invData.records || [];
+    invRows.forEach(r=>{
+      (r.fields?.['Wine (Link to Wines)'] || []).forEach(id => wineIDs.add(id));
+      (r.fields?.['Location (Link to Locations)'] || []).forEach(id => locIDs.add(id));
+    });
+
+    // Build maps
+    const wineMap = await fetchNameMap(S.wines, Array.from(wineIDs), ['Name','Vintage']);
+    const locMeta = await fetchLocMeta(Array.from(locIDs)); // {id:{rack,row,col}}
+
+    // Aggregate occupancy by rack-row-col
+    const occ = {}; // key: Rack|Row|Col -> [{name,qty}]
+    invRows.forEach(r=>{
+      const qty = Number(r.fields?.Quantity ?? 0) || 0;
+      const wines = r.fields?.['Wine (Link to Wines)'] || [];
+      const locs  = r.fields?.['Location (Link to Locations)'] || [];
+      if (!qty || !wines.length || !locs.length) return;
+
+      wines.forEach(wid=>{
+        const w = wineMap[wid];
+        const wname = w ? `${w.Name || ''}${w.Vintage ? ' — '+w.Vintage : ''}` : wid;
+        locs.forEach(lid=>{
+          const m = locMeta[lid];
+          if (!m) return;
+          const rack = m.rack || 'Rack 1';
+          const row  = m.row  || 'Row 1';
+          const col  = m.col  || '1';
+          const key = `${rack}|${row}|${col}`;
+          if (!occ[key]) occ[key] = [];
+          occ[key].push({ name: wname, qty });
+        });
+      });
+    });
+
+    // Paint cells that have wines
+    document.querySelectorAll('.slot').forEach(slot=>{
+      const rack = slot.dataset.rack;
+      const row  = slot.dataset.row;
+      const col  = slot.dataset.col;
+      const key  = `${rack}|${row}|${col}`;
+      if (occ[key] && occ[key].length){
+        slot.classList.add('has');
+        slot.addEventListener('click', ()=>{
+          const lines = occ[key].map(x=>`• ${x.name} — Qty: ${x.qty}`);
+          alert(`${rack} • ${row} • Column ${col}\n\n${lines.join('\n')}`);
+        });
+      }else{
+        // keep visible & clickable (shows empty)
+        slot.addEventListener('click', ()=>{
+          alert(`${rack} • ${row} • Column ${col}\n\n(Empty)`);
+        });
+      }
+    });
+
+  }catch(err){
+    console.error('Cellar map error', err);
+    // still keep grid visible
+  }
+}
+
+async function fetchNameMap(tableName, ids, fields){
+  const map = {};
+  if (!ids.length) return map;
+  for (let i = 0; i < ids.length; i += 50){
+    const chunk = ids.slice(i, i+50);
+    const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
+    const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(tableName)}?filterByFormula=${encodeURIComponent(formula)}${fields?.length ? fields.map(f=>`&fields[]=${encodeURIComponent(f)}`).join('') : ''}&maxRecords=50`;
+    const res = await fetch(url, { headers: headers() });
+    const json = await res.json();
+    (json.records || []).forEach(rec => map[rec.id] = rec.fields || {});
+  }
+  return map;
+}
+
+async function fetchLocMeta(ids){
+  const map = {};
+  if (!ids.length) return map;
+  for (let i = 0; i < ids.length; i += 50){
+    const chunk = ids.slice(i, i+50);
+    const formula = `OR(${chunk.map(id => `RECORD_ID()='${id}'`).join(',')})`;
+    const url = `https://api.airtable.com/v0/${S.base}/${encodeURIComponent(S.loc)}?filterByFormula=${encodeURIComponent(formula)}&fields[]=Rack&fields[]=Row&fields[]=Column&maxRecords=50`;
+    const res = await fetch(url, { headers: headers() });
+    const json = await res.json();
+    (json.records || []).forEach(rec=>{
+      const f = rec.fields || {};
+      map[rec.id] = { rack: f.Rack || '', row: f.Row || '', col: f.Column || '' };
+    });
+  }
+  return map;
+}
