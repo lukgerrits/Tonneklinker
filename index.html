@@ -4,15 +4,47 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Tonneklinker · Cellar</title>
-  <link rel="icon" type="image/png" href="icon-192.png?v=49" />
+  <link rel="icon" type="image/png" href="icon-192.png?v=50" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=49" />
+  <link rel="stylesheet" href="styles.css?v=50" />
+  <style>
+    /* minimal map styling that piggybacks on your dark theme */
+    .rack {
+      margin: 12px 0 18px;
+      padding: 12px;
+      border: 1px solid #333;
+      border-radius: 12px;
+      background: #111;
+    }
+    .rack h3 { margin: 0 0 8px; font-size: 1rem; color: #ddd; }
+    .grid-map {
+      display: grid;
+      gap: 6px;
+    }
+    .cell {
+      background: #1b1b1b;
+      border: 1px solid #2f2f2f;
+      border-radius: 8px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .85rem;
+      color: #aaa;
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+    }
+    .cell.occupied { background: #153d2a; border-color: #2e6d4f; color: #cfe9da; }
+    .cell:hover { outline: 1px dashed #555; }
+    .legend { margin: 6px 0 12px; color: #aaa; font-size: .9rem; }
+  </style>
 </head>
 
 <body>
   <!-- ===== Header ===== -->
   <header style="display:flex;align-items:center;gap:12px;padding:8px 12px;">
-    <img class="logo" src="icon-192.png?v=49" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px;" />
+    <img class="logo" src="icon-192.png?v=50" alt="Tonneklinker" style="width:42px;height:42px;border-radius:8px;" />
     <h1 style="margin-right:auto;font-size:1.4rem;">Tonneklinker · Cellar</h1>
     <button id="btn-open-add" class="btn">+ Add Wine</button>
     <nav style="margin-left:8px;">
@@ -32,10 +64,10 @@
       <div id="results" style="margin-top:12px;"></div>
     </section>
 
-    <!-- Cellar Map placeholder (keep if you want it; safe to remove) -->
+    <!-- Cellar Map -->
     <section class="card">
       <h2>Cellar Map</h2>
-      <p class="badge">Tap a row to see wines. Green = has bottles.</p>
+      <p class="legend">Green cells have bottles. Click a cell to see wines there.</p>
       <div id="cellar-map" style="margin-top:8px;"></div>
     </section>
 
@@ -91,6 +123,6 @@
 
   <footer style="text-align:center;margin:20px;">© Tonneklinker</footer>
 
-  <script src="app.js?v=49"></script>
+  <script src="app.js?v=50"></script>
 </body>
 </html>
