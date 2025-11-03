@@ -5,30 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Tonneklinker • Cellar</title>
 
-  <!-- PWA + icons (unchanged) -->
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icon-180.png">
   <meta name="theme-color" content="#5A0E2E"/>
 
-  <!-- Your dark theme stylesheet (unchanged) -->
-  <link rel="stylesheet" href="./styles.css?v=50">
+  <link rel="stylesheet" href="./styles.css?v=51">
 
   <style>
-    /* v50 extras */
+    /* v51 essentials that shouldn’t break if external CSS changes */
     .hidden{display:none!important}
     .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-    .cellar-grid{display:grid;gap:6px;margin-top:10px}
-    .rack-title{margin:10px 0 6px;font-weight:600}
-    .cell{padding:10px;border:1px solid #333;border-radius:10px;text-align:center}
-    .cell.has{background:#0b3d2d;border-color:#0b3d2d;color:#b6ffe5;cursor:pointer}
     .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:999px;background:#222;color:#ccc;font-size:.85rem}
     .chip.btn{cursor:pointer}
-    img.label{width:56px;height:56px;border-radius:8px;object-fit:cover;margin-right:12px}
     .wine-card{display:flex;gap:12px;align-items:flex-start}
     .meta{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px}
-    /* hide inventory list altogether per request */
-    #inventory-section{display:none}
+    img.label{width:56px;height:56px;border-radius:8px;object-fit:cover;margin-right:12px}
     header{display:flex;align-items:center;gap:12px}
     header .logo{width:42px;height:42px;border-radius:8px}
     header nav a.badge{padding:4px 8px;border-radius:8px;background:#222;color:#bbb}
@@ -36,12 +28,14 @@
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:50}
     .modal.open{display:flex}
     .modal .card{background:#111;border:1px solid #333;border-radius:16px;padding:20px;max-width:720px;width:92%}
+    /* Hide inventory section by request */
+    #inventory-section{display:none}
   </style>
 </head>
 
 <body>
   <header class="container" style="padding:8px 12px;">
-    <img class="logo" src="icon-192.png?v=50" alt="Tonneklinker"/>
+    <img class="logo" src="icon-192.png?v=51" alt="Tonneklinker"/>
     <h1 style="margin-right:auto">Tonneklinker · Cellar</h1>
     <button id="btn-open-add" class="btn">+ Add Wine</button>
     <nav><a href="./mobile.html" class="badge">Mobile</a></nav>
@@ -65,7 +59,7 @@
       <div id="cellar-map"></div>
     </section>
 
-    <!-- INVENTORY (hidden on purpose) -->
+    <!-- INVENTORY (hidden) -->
     <section class="card" id="inventory-section">
       <h2>Inventory</h2>
       <div id="inventory"></div>
@@ -125,7 +119,7 @@
 
   <footer>© Tonneklinker</footer>
 
-  <script src="./app.js?v=53"></script>
+  <script src="./app.js?v=54"></script>
   <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./service-worker.js');}</script>
 </body>
 </html>
