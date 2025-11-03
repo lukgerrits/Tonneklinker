@@ -1,4 +1,4 @@
-// ---- Tonneklinker app.js (v58) ----
+// ---- Tonneklinker app.js (v59) ----
 
 // ---------- Settings helpers ----------
 const S = {
@@ -263,7 +263,7 @@ function afterRenderWines(records){
 }
 
 // Create a tooltip chip and wire hover/click highlighting
-function addCellarChip(containerEl, positions){
+function addCellarChip(containerEl, positions) {
   const chip = document.createElement('span');
   chip.className = 'badge chip btn';
   chip.textContent = '📍 cellar';
@@ -274,21 +274,37 @@ function addCellarChip(containerEl, positions){
   if (!positions.length) {
     tip.innerHTML = `<div class="tip-empty">No cellar location found.</div>`;
   } else {
-    positions.forEach(p=>{
+    positions.forEach(p => {
       const row = document.createElement('div');
       row.className = 'tip-row';
       row.textContent = `Rack ${p.rack} · Row ${p.row} · Col ${p.col} — Qty: ${p.qty}`;
 
-      row.addEventListener('mouseenter', ()=>{
-        highlightCell(p.rack,p.row,p.col,{scroll:false,flash:true});
-      });
-      row.addEventListener('mouseleave', ()=>{
+      // 🔥 On hover → rack cell glows continuously
+      row.addEventListener('mouseenter', () => {
         const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
         const el = document.getElementById(id);
-        if (el) el.classList.remove('highlight','pulse');
+        if (el) {
+          el.classList.add('hover-highlight');
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       });
-      row.addEventListener('click', ()=>{
-        highlightCell(p.rack,p.row,p.col,{scroll:true,flash:true});
+
+      // 🧊 On leave → fade back to normal
+      row.addEventListener('mouseleave', () => {
+        const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('hover-highlight');
+      });
+
+      // 🖱️ On click → scroll & pulse briefly
+      row.addEventListener('click', () => {
+        const id = `cell-r${p.rack}-r${p.row}-c${p.col}`;
+        const el = document.getElementById(id);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('pulse');
+          setTimeout(() => el.classList.remove('pulse'), 1200);
+        }
       });
 
       tip.appendChild(row);
@@ -297,13 +313,18 @@ function addCellarChip(containerEl, positions){
 
   document.body.appendChild(tip);
 
-  chip.addEventListener('mouseenter', ()=>{
+  // Show tooltip when hovering the “📍 cellar” chip
+  chip.addEventListener('mouseenter', () => {
     const r = chip.getBoundingClientRect();
     tip.style.left = `${r.left}px`;
-    tip.style.top  = `${r.bottom + 6}px`;
+    tip.style.top = `${r.bottom + 6}px`;
     tip.style.display = 'block';
   });
-  chip.addEventListener('mouseleave', ()=> tip.style.display = 'none');
+
+  chip.addEventListener('mouseleave', () => {
+    tip.style.display = 'none';
+    document.querySelectorAll('.hover-highlight').forEach(el => el.classList.remove('hover-highlight'));
+  });
 
   containerEl.appendChild(chip);
 }
