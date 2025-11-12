@@ -19,7 +19,7 @@
       <h2>Search Wines</h2>
       <div class="grid cols-2">
         <input id="q" placeholder="Search by name, producer, grape, vintage…"/>
-        <button id="btn-search">Search</button>
+        <button id="btn-search" type="button">Search</button>
       </div>
       <div id="results" style="margin-top:12px"></div>
     </section>
@@ -33,20 +33,21 @@
     <section class="card">
       <h2>Settings</h2>
       <div class="grid cols-2">
-        <input id="airtableBase" placeholder="Airtable Base ID"/>
-        <input id="airtableToken" placeholder="Airtable Personal Access Token"/>
+        <input id="airtableBase" placeholder="Airtable Base ID" autocomplete="off"/>
+        <input id="airtableToken" placeholder="Airtable Personal Access Token" autocomplete="off" />
         <input id="winesTable" placeholder="Wines table" value="Wines"/>
         <input id="inventoryTable" placeholder="Inventory table" value="Inventory"/>
         <input id="locationsTable" placeholder="Locations table" value="Locations"/>
       </div>
       <div style="margin-top:10px">
-        <button id="btn-save">Save</button>
+        <button id="btn-save" type="button">Save</button>
         <span id="save-ok" class="badge" style="display:none;margin-left:8px">Saved</span>
       </div>
       <p class="badge" style="margin-top:10px">Your token is stored locally on this device only.</p>
     </section>
   </main>
 
-  <script src="app.js?v=63" defer></script>
+  <!-- IMPORTANT: bump the version to evict any bad cached script -->
+  <script src="app.js?v=64" defer></script>
 </body>
 </html>
