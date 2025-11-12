@@ -1,5 +1,4 @@
-<script>
-/* ---------------- Tonneklinker app.js v63 ---------------- */
+/* ---------------- Tonneklinker app.js v65 ---------------- */
 
 const S = {
   get base(){ return localStorage.getItem('tk_base') || ''; },
@@ -35,6 +34,7 @@ const F = {
     col:    'Column',
     name:   'Name',
   },
+  // If your price field is literally "Price (€)" change this entry to that string
   WINES_PICK: ['Name','Vintage','Country','Region','Producer','Grape','Taste','Food Pairing','Drinkable from','Drinkable to','Price','Label Image']
 };
 
@@ -45,7 +45,6 @@ function getText(val){
   if (val == null) return '';
   if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return String(val);
   if (Array.isArray(val)) return val.map(getText).join(', ');
-  // Airtable rich text / AI structured outputs
   if (val.value) return getText(val.value);
   if (val.text)  return getText(val.text);
   if (val.content) return getText(val.content);
@@ -83,9 +82,8 @@ document.addEventListener('DOMContentLoaded', () => {
     S.wines = q('#winesTable')?.value.trim() || S.wines;
     S.inv   = q('#inventoryTable')?.value.trim() || S.inv;
     S.loc   = q('#locationsTable')?.value.trim() || S.loc;
-    alert('Saved locally.');
-    // Try (re)loading data right away
-    refreshData();
+    const ok = q('#save-ok'); if (ok){ ok.style.display='inline-flex'; setTimeout(()=>ok.style.display='none', 1000); }
+    refreshData(); // reload data immediately after save
   });
 
   const btn = q('#btn-search');
@@ -93,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btn) btn.addEventListener('click', e=>{ e.preventDefault(); search(); });
   if (inp)  inp.addEventListener('keydown', e=>{ if (e.key === 'Enter'){ e.preventDefault(); search(); }});
 
-  // Build cellar map now (empty until data arrives)
+  // Initial empty map
   renderCellarMap([]);
 
   // Pull data once we have credentials
@@ -110,7 +108,9 @@ async function refreshData(){
   try{
     const [locations, inventory] = await Promise.all([ fetchLocations(), fetchInventory() ]);
     buildIndices(locations, inventory);
-    paintMapHasBottles(); // green cells based on qty
+    // Re-render the map with the discovered rack/row/col layout, then paint occupancy
+    renderCellarMap(locations);
+    paintMapHasBottles();
   }catch(e){
     err('refreshData failed', e);
   }
@@ -215,7 +215,7 @@ function buildIndices(locations, inventory){
 }
 
 /* -------------------- Cellar map rendering & paint -------------------- */
-function renderCellarMap(locations){
+function renderCellarMap(/* locations not used directly; uses window.cellIndex */){
   // If we have locations, derive racks/rows/cols from them; else show an empty Rack 1.
   let racks = new Map();
   for (const k of Object.keys(window.cellIndex)){
@@ -296,7 +296,7 @@ function showCellWines(cellKey){
     alert(`${label}\n\n(Empty)`);
     return;
   }
-  const lines = winesAtCell.map(x => `• ${x.wineId} — Qty: ${x.qty}`); // wineId displayed (unless you want names via an extra wine-name map)
+  const lines = winesAtCell.map(x => `• ${x.wineId} — Qty: ${x.qty}`);
   alert(`${label}\n\n${lines.join('\n')}`);
 }
 
@@ -367,7 +367,7 @@ function renderSearchCards(records){
     const imgUrl = Array.isArray(f['Label Image']) ? f['Label Image'][0]?.url : (f['Label Image']?.url || '');
     const labelImg = imgUrl ? `<img src="${imgUrl}" class="label-img" alt="Label"/>` : '';
 
-    const chips = [
+    const bits = [
       [getText(f.Country), getText(f.Region)].filter(Boolean).join(' – ') || null,
       f.Producer ? `🏷️ ${getText(f.Producer)}` : null,
       f.Grape ? `🍇 ${getText(f.Grape)}` : null,
@@ -377,9 +377,15 @@ function renderSearchCards(records){
         ? `🕰️ ${[getText(f['Drinkable from']), getText(f['Drinkable to'])].filter(Boolean).join(' – ')}`
         : null,
       (f.Price !== '' && f.Price != null) ? `💶 € ${Number(f.Price).toFixed(2)}` : null,
-      // Cellar chip placeholder; data-wine carries the record id
+      // cellar chip carries the wine id
       `<span class="badge cellar-chip" data-wine="${rec.id}" title="Show cellar position(s)">📍 cellar</span>`
-    ].filter(Boolean).map(x => `<span class="badge">${x}</span>`).join(' ');
+    ].filter(Boolean);
+
+    const chips = bits.map(x => {
+      // avoid double-wrapping the cellar chip badge
+      if (typeof x === 'string' && x.includes('cellar-chip')) return x;
+      return `<span class="badge">${x}</span>`;
+    }).join(' ');
 
     return `
       <div class="card wine-card">
@@ -406,7 +412,6 @@ function onCellarHover(e){
   const wineId = e.currentTarget.getAttribute('data-wine');
   const pos = window.locationIndexByWine[wineId] || [];
   if (!pos.length){
-    // Helpful toast for debugging
     console.info('No cellar positions for wine', wineId, {locationIndexByWine: window.locationIndexByWine});
     return;
   }
@@ -415,7 +420,7 @@ function onCellarHover(e){
     if (el) el.classList.add('hover-target');
   });
 }
-function onCellarLeave(e){
+function onCellarLeave(){
   qa('.cell.hover-target').forEach(el=> el.classList.remove('hover-target'));
 }
 function onCellarClick(e){
@@ -436,5 +441,3 @@ window._probe = ()=>{
   console.log('cellIndex size:', Object.keys(window.cellIndex||{}).length);
   console.log('locationIndexByWine size:', Object.keys(window.locationIndexByWine||{}).length);
 };
-
-</script>
