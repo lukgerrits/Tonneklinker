@@ -1,5 +1,5 @@
 
-const CACHE_VERSION = '72';
+const CACHE_VERSION = '73';
 const CACHE_NAME = `tonneklinker-${CACHE_VERSION}`;
 
 const ASSETS = [
