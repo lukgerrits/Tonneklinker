@@ -1,4 +1,4 @@
-// ---------------- Tonneklinker app.js v70 ----------------
+// ---------------- Tonneklinker app.js v71 ----------------
 
 // --------- settings in localStorage ----------
 const S = {
