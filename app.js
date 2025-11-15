@@ -1,4 +1,4 @@
-/* ---------------- Tonneklinker app.js v73 ---------------- */
+/* ---------------- Tonneklinker app.js v74 ---------------- */
 
 /* ========== Tiny state helper around localStorage ========== */
 
@@ -28,7 +28,7 @@ const headers = () => ({
 
 /* ---------- Airtable field names (adjust here if they change) ---------- */
 
-const PRICE_FIELD = 'Price (€)';   // <-- THIS is how it’s named in Airtable
+const PRICE_FIELD = 'Price';       // <-- actual Airtable field name
 
 const F = {
   INV: {
