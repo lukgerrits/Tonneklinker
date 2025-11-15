@@ -1,68 +1,67 @@
-:root{
-  --bg:#0E0F12; --fg:#EAEAEA; --muted:#9AA0A6;
-  --accent:#5A0E2E; --accent2:#106C6C;
-  --card:#15171D; --stroke:#21232B; --chip:#2b2b2b; --chip2:#2a2e39;
-  --ok:#1b6b3a; --blink:#ffc857;
+/* -----------------------------------------------------------
+   CELLAR MAP GRID
+----------------------------------------------------------- */
+.rack-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
 }
-*{ box-sizing:border-box }
-body{
-  margin:0; font:16px/1.45 Inter,-apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-  color:var(--fg); background:linear-gradient(180deg,#121318,#0E0F12);
-}
-header{ display:flex; align-items:center; gap:12px; padding:14px 18px; position:sticky; top:0;
-  background:rgba(14,15,18,.75); backdrop-filter:blur(10px); border-bottom:1px solid #222; z-index:3; }
-header img.logo{ width:36px; height:36px; border-radius:9px }
-h1{ margin:0; font-size:20px }
-.container{ max-width:1100px; margin:24px auto; padding:0 20px }
-.card{ background:var(--card); border:1px solid var(--stroke); border-radius:16px; padding:16px; margin:16px 0;
-  box-shadow:0 8px 24px rgba(0,0,0,.25); }
-button{
-  background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; border:0;
-  border-radius:12px; padding:12px 16px; font-weight:600; cursor:pointer
-}
-input{ width:100%; padding:10px 12px; background:#0F1116; color:var(--fg);
-  border:1px solid #262a33; border-radius:10px }
-.grid{ display:grid; gap:12px } .cols-2{ grid-template-columns:1fr 1fr }
-@media(max-width:800px){ .cols-2{ grid-template-columns:1fr } }
-.badge{ padding:6px 10px; background:var(--chip); border:1px solid var(--chip2);
-  border-radius:999px; color:#cfd3da; display:inline-flex; align-items:center; gap:6px }
 
-/* wine cards */
-.wine-card { display:flex; gap:12px; align-items:flex-start; }
-.label-img { width:60px; height:90px; object-fit:cover; border-radius:6px; }
-.wine-info .meta { margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; }
-
-/* tooltip */
-.tooltip {
-  position:absolute; transform:translate(-50%, 10px);
-  background:#0f1116; border:1px solid #2a2e39; color:#e8eaed;
-  padding:8px 10px; border-radius:10px; font-size:13px; white-space:nowrap;
-  box-shadow:0 8px 24px rgba(0,0,0,.35); pointer-events:none; z-index:5;
-}
-.tooltip .line { display:flex; gap:10px; align-items:center }
-.tooltip .line:hover { text-decoration:underline }
-
-/* cellar map grid */
-.rack-title{ margin:12px 0 8px; font-weight:600 }
-.rack-grid{ display:grid; gap:8px; grid-template-columns:repeat(6, minmax(70px,1fr)); margin-bottom:14px }
+/* -----------------------------------------------------------
+   CELL STYLE
+----------------------------------------------------------- */
 .cell {
-  display:flex; align-items:center; justify-content:center;
-  border:1px solid #2a2e39; border-radius:10px; padding:10px 0;
-  background:#0F1116; color:#cfd3da; position:relative; transition:background .2s, box-shadow .2s, transform .15s;
+  padding: 10px 0;
+  text-align: center;
+  border-radius: 10px;
+  border: 1px solid #2a2e39;
+  background: #15171d;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
 }
-.cell.has { background:#0f2018; border-color:#224d38; color:#bfe6cd; box-shadow:0 0 0 2px rgba(27,107,58,.2) inset }
-.cell.highlight { outline:2px solid var(--blink); box-shadow:0 0 0 3px rgba(255,200,87,.35); transform:translateY(-2px) }
-@keyframes blink {
-  0%{ outline-color:var(--blink); } 50%{ outline-color:transparent; } 100%{ outline-color:var(--blink); }
+
+.cell:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px #3b455c;
 }
-.cell.blink { animation: blink 1s ease-in-out 3 }
 
-/* chips */
-.chip-country::before { content:'🏳️'; margin-right:.25rem }
-.chip-grape::before { content:'🍇'; margin-right:.25rem }
-.chip-producer::before { content:'🏷️'; margin-right:.25rem }
-.chip-taste::before { content:'🍷'; margin-right:.25rem }
+/* -----------------------------------------------------------
+   CELL HAS BOTTLES (Green indicator)
+----------------------------------------------------------- */
+.cell.has-bottle {
+  background: #0b3a2b;
+  border-color: #00ff9d;
+  box-shadow: 0 0 6px rgba(0,255,157,0.4);
+}
 
-/* cellar badge in results */
-.cellar-chip{ cursor:pointer; user-select:none }
-.cellar-chip:hover{ background:#1a1d26 }
+/* -----------------------------------------------------------
+   HIGHLIGHT ON HOVER OF “📍 cellar” CHIP
+----------------------------------------------------------- */
+.cell.hover-target {
+  box-shadow: 0 0 0 2px #00ffb3;
+  border-color: #00ffb3;
+}
+
+/* -----------------------------------------------------------
+   BLINK ANIMATION WHEN CLICKING “📍 cellar”
+----------------------------------------------------------- */
+@keyframes blinkCell {
+  0%, 100% {
+    box-shadow: 0 0 0 3px #00ffb3;
+    border-color: #00ffb3;
+  }
+  50% {
+    box-shadow: 0 0 0 3px transparent;
+    border-color: #2a2e39;
+  }
+}
+
+.cell.blink {
+  animation: blinkCell 1.2s ease-in-out 2;
+}
