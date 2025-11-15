@@ -1,6 +1,185 @@
-/* -----------------------------------------------------------
-   CELLAR MAP GRID
------------------------------------------------------------ */
+/* ===============================
+   Tonneklinker · global styling
+================================= */
+
+:root {
+  --bg: #0e0f12;
+  --fg: #eaeaea;
+  --muted: #9aa0a6;
+  --accent: #5a0e2e;
+  --accent2: #106c6c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: 16px/1.45 Inter, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  color: var(--fg);
+  background: linear-gradient(180deg, #121318, #0e0f12);
+}
+
+/* ===============================
+   Header
+================================= */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(14, 15, 18, 0.75);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid #222;
+}
+
+header img.logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+/* link in header */
+header .badge {
+  margin-left: auto;
+}
+
+/* ===============================
+   Layout & cards
+================================= */
+
+.container {
+  max-width: 1100px;
+  margin: 24px auto;
+  padding: 0 20px 40px;
+}
+
+.card {
+  background: #15171d;
+  border: 1px solid #21232b;
+  border-radius: 16px;
+  padding: 16px;
+  margin: 16px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.card h2 {
+  margin: 0 0 10px;
+}
+
+.card h3 {
+  margin: 0 0 8px;
+}
+
+/* ===============================
+   Buttons, inputs, badges
+================================= */
+
+button {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 120px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  background: #0f1116;
+  color: var(--fg);
+  border: 1px solid #262a33;
+  border-radius: 10px;
+}
+
+input::placeholder {
+  color: var(--muted);
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+.cols-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 800px) {
+  .cols-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid #2a2e39;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: #cfd3da;
+  background: #1a1d26;
+}
+
+/* ===============================
+   Search result cards
+================================= */
+
+.wine-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.label-img {
+  width: 60px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.wine-info {
+  flex: 1;
+}
+
+.wine-info b {
+  font-size: 1rem;
+}
+
+.wine-info .meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ===============================
+   Cellar map grid & cells
+================================= */
+
 .rack-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -8,9 +187,7 @@
   margin-top: 12px;
 }
 
-/* -----------------------------------------------------------
-   CELL STYLE
------------------------------------------------------------ */
+/* base cell look */
 .cell {
   padding: 10px 0;
   text-align: center;
@@ -31,28 +208,23 @@
   box-shadow: 0 0 0 1px #3b455c;
 }
 
-/* -----------------------------------------------------------
-   CELL HAS BOTTLES (Green indicator)
------------------------------------------------------------ */
+/* cell contains bottles (from inventory) */
 .cell.has-bottle {
   background: #0b3a2b;
   border-color: #00ff9d;
-  box-shadow: 0 0 6px rgba(0,255,157,0.4);
+  box-shadow: 0 0 6px rgba(0, 255, 157, 0.4);
 }
 
-/* -----------------------------------------------------------
-   HIGHLIGHT ON HOVER OF “📍 cellar” CHIP
------------------------------------------------------------ */
+/* highlighted from a “📍 cellar” chip hover */
 .cell.hover-target {
   box-shadow: 0 0 0 2px #00ffb3;
   border-color: #00ffb3;
 }
 
-/* -----------------------------------------------------------
-   BLINK ANIMATION WHEN CLICKING “📍 cellar”
------------------------------------------------------------ */
+/* blink animation when clicking a “📍 cellar” chip */
 @keyframes blinkCell {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 3px #00ffb3;
     border-color: #00ffb3;
   }
@@ -64,4 +236,18 @@
 
 .cell.blink {
   animation: blinkCell 1.2s ease-in-out 2;
+}
+
+/* ===============================
+   Misc
+================================= */
+
+a {
+  color: #9dd5d5;
+}
+
+footer {
+  opacity: 0.6;
+  text-align: center;
+  padding: 24px;
 }
