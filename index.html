@@ -18,7 +18,7 @@
     <section class="card">
       <h2>Search Wines</h2>
       <div class="grid cols-2">
-        <input id="q" placeholder="Search by name, producer, grape, vintage…"/>
+        <input id="q" placeholder="Search by name, producer, grape, vintage, taste, food pairing…"/>
         <button id="btn-search" type="button">Search</button>
       </div>
       <div id="results" style="margin-top:12px"></div>
@@ -26,7 +26,10 @@
 
     <section class="card">
       <h2>Cellar Map</h2>
-      <p class="badge">Green cells have bottles. Click a cell to see wines there. Hover/click a “📍 cellar” result to highlight a cell.</p>
+      <p class="badge">
+        Green cells have bottles. Click a cell to see wines there.
+        Hover/click a “📍 cellar” result to highlight a cell.
+      </p>
       <div id="cellar-map"></div>
     </section>
 
@@ -34,7 +37,7 @@
       <h2>Settings</h2>
       <div class="grid cols-2">
         <input id="airtableBase" placeholder="Airtable Base ID" autocomplete="off"/>
-        <input id="airtableToken" placeholder="Airtable Personal Access Token" autocomplete="off" />
+        <input id="airtableToken" placeholder="Airtable Personal Access Token" autocomplete="off"/>
         <input id="winesTable" placeholder="Wines table" value="Wines"/>
         <input id="inventoryTable" placeholder="Inventory table" value="Inventory"/>
         <input id="locationsTable" placeholder="Locations table" value="Locations"/>
@@ -47,7 +50,7 @@
     </section>
   </main>
 
-  <!-- IMPORTANT: bump the version to evict any bad cached script -->
- <script src="app.js?v=71" defer></script>
+  <!-- bump version whenever app.js changes -->
+  <script src="app.js?v=72" defer></script>
 </body>
 </html>
