@@ -1,4 +1,4 @@
-/* ---------------- Tonneklinker app.js v72 ---------------- */
+/* ---------------- Tonneklinker app.js v73 ---------------- */
 
 /* ========== Tiny state helper around localStorage ========== */
 
@@ -28,6 +28,8 @@ const headers = () => ({
 
 /* ---------- Airtable field names (adjust here if they change) ---------- */
 
+const PRICE_FIELD = 'Price (€)';   // <-- THIS is how it’s named in Airtable
+
 const F = {
   INV: {
     wine:     'Wine (Link to Wines)',
@@ -52,7 +54,7 @@ const F = {
     'Food Pairing',
     'Drinkable from',
     'Drinkable to',
-    'Price',
+    PRICE_FIELD,
     'Label Image'
   ]
 };
@@ -409,7 +411,7 @@ async function search(){
 
   const pieces = raw.split(/\s+/).filter(Boolean);
 
-  // CONCATENATE of all searchable fields
+  // CONCATENATE of all searchable fields – with correct Price field
   const concat =
     "CONCATENATE(" +
     "{Name},' '," +
@@ -422,7 +424,7 @@ async function search(){
     "{Food Pairing},' '," +
     "{Drinkable from},' '," +
     "{Drinkable to},' '," +
-    "{Price}" +
+    `{${PRICE_FIELD}}` +
     ")";
 
   const formula = pieces.length
@@ -461,7 +463,7 @@ async function search(){
         f['Food Pairing'],
         f['Drinkable from'],
         f['Drinkable to'],
-        f.Price
+        f[PRICE_FIELD]
       ].filter(Boolean).join(' '));
       return needles.every(t => hay.includes(t));
     });
@@ -497,9 +499,9 @@ function renderSearchCards(records){
     const countryRegion = [getText(f.Country), getText(f.Region)].filter(Boolean).join(' – ');
     if (countryRegion) chips.push(countryRegion);
 
-    if (f.Producer)      chips.push(`🏷️ ${getText(f.Producer)}`);
-    if (f.Grape)         chips.push(`🍇 ${getText(f.Grape)}`);
-    if (f.Taste)         chips.push(`🍷 ${getText(f.Taste)}`);
+    if (f.Producer)        chips.push(`🏷️ ${getText(f.Producer)}`);
+    if (f.Grape)           chips.push(`🍇 ${getText(f.Grape)}`);
+    if (f.Taste)           chips.push(`🍷 ${getText(f.Taste)}`);
     if (f['Food Pairing']) chips.push(`🍽️ ${getText(f['Food Pairing'])}`);
 
     if (f['Drinkable from'] || f['Drinkable to']){
@@ -507,9 +509,10 @@ function renderSearchCards(records){
       chips.push(`🕰️ ${range}`);
     }
 
-    if (f.Price !== '' && f.Price != null){
-      const price = Number(f.Price);
-      chips.push(`💶 € ${price.toFixed(2)}`);
+    const priceVal = f[PRICE_FIELD];
+    if (priceVal !== '' && priceVal != null){
+      const num = Number(priceVal);
+      chips.push(`💶 € ${isNaN(num) ? getText(priceVal) : num.toFixed(2)}`);
     }
 
     // cellar chip
